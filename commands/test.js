@@ -814,23 +814,25 @@ async function handleTest(message, args) {
             await postResultsEmbed(testChannel, results, 'Giveaway & Spin');
         }
 
-        // Reset — same awaitReactions pattern as hype
-        await testChannel.send('🔄 Running `!reset` to clean up...');
-        const resetMsg = buildTestMessage('!reset', testChannel);
-        resetMsg.author.id = client.user.id;
-        const resetPromise = handleReset(resetMsg);
-        await delay(1000);
-        if (resetMsg.channel.lastMessage) {
-            try { await resetMsg.channel.lastMessage.react('✅'); } catch { /* ok */ }
+        // Post reset to #ops — user must react ✅ to confirm
+        clearChannelOverrides();
+        const opsChannel = getChannel('OPS');
+        if (opsChannel) {
+            await opsChannel.send('🧪 **Test suite complete.** Confirm `!reset` below to clean up test data.');
         }
-        await resetPromise;
+        await testChannel.send('⏳ Waiting for `!reset` confirmation in <#' + config.CHANNELS.OPS + '>...');
 
-        // Restore community goals pinned message ID (reset wiped it)
+        // Run reset in #ops with the real user's author ID for the reaction filter
+        const resetMsg = buildTestMessage('!reset', opsChannel || testChannel);
+        resetMsg.author.id = message.author.id;
+        await handleReset(resetMsg);
+
+        // Restore community goals pinned message ID after reset
         if (savedGoalMessageId) {
             goals.setMessageId.run(savedGoalMessageId);
         }
+        await testChannel.send('✅ Reset complete. Community goals restored.');
     } finally {
-        clearChannelOverrides();
     }
 }
 
@@ -859,6 +861,8 @@ async function runTestSuite(flow) {
             allResults.push(...results);
         }
 
+        // For HTTP-triggered runs, auto-confirm reset (no user to react)
+        clearChannelOverrides();
         await testChannel.send('🔄 Running `!reset` to clean up...');
         const resetMsg = buildTestMessage('!reset', testChannel);
         resetMsg.author.id = client.user.id;
@@ -874,7 +878,7 @@ async function runTestSuite(flow) {
             goals.setMessageId.run(savedGoalMessageId);
         }
     } finally {
-        clearChannelOverrides();
+        // overrides already cleared
     }
 
     return allResults;
