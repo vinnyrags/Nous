@@ -15,10 +15,10 @@ import { alertNewProducts } from '../alerts/products.js';
 
 const exec = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = path.resolve(__dirname, '../..');
-const PUSH_SCRIPT = path.join(PROJECT_ROOT, 'scripts/shop/push-products.js');
-const PULL_SCRIPT = path.join(PROJECT_ROOT, 'scripts/pull-products.php');
-const WP_PATH = path.resolve(PROJECT_ROOT, 'wp');
+const BOT_ROOT = path.resolve(__dirname, '..');
+const PUSH_SCRIPT = path.join(BOT_ROOT, 'scripts/shop/push-products.js');
+const PULL_SCRIPT = process.env.PULL_SCRIPT_PATH || path.join(BOT_ROOT, 'scripts/pull-products.php');
+const WP_PATH = process.env.WP_PATH || '/var/www/vincentragosta.io/wp';
 
 /**
  * Resolve the Node.js binary — handles NVM environments.
@@ -34,7 +34,7 @@ async function pushToStripe(clean) {
     const args = [PUSH_SCRIPT];
     if (clean) args.push('--clean');
     const { stdout } = await exec(getNodePath(), args, {
-        cwd: PROJECT_ROOT,
+        cwd: BOT_ROOT,
         timeout: 120000,
         env: { ...process.env, HOME: process.env.HOME || '/root' },
     });
@@ -50,7 +50,7 @@ async function pullToWordPress() {
         `--path=${WP_PATH}`,
         '--allow-root',
     ], {
-        cwd: PROJECT_ROOT,
+        cwd: BOT_ROOT,
         timeout: 120000,
         env: {
             ...process.env,

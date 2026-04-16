@@ -6,17 +6,13 @@
  * bot process, which may be restarting).
  *
  * Usage:
- *   node bot/notify-deploy.js --status=push --branch=main --summary="commit info"
- *   node bot/notify-deploy.js --status=success --branch=main --env=production --summary="commit info"
- *   node bot/notify-deploy.js --status=tests-failed --branch=main --env=production --output="failure details"
- *   node bot/notify-deploy.js --status=failed --branch=main --env=production --error="build error"
+ *   node notify-deploy.js --status=push --branch=main --summary="commit info"
+ *   node notify-deploy.js --status=success --branch=main --env=production --summary="commit info"
+ *   node notify-deploy.js --status=tests-failed --branch=main --env=production --output="failure details"
+ *   node notify-deploy.js --status=failed --branch=main --env=production --error="build error"
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import 'dotenv/config';
 
 // Parse args
 const args = Object.fromEntries(
@@ -30,14 +26,7 @@ const args = Object.fromEntries(
 
 const { status, branch, env, summary, output, error } = args;
 
-// Read bot token from wp-config-env.php
-const configPath = path.resolve(__dirname, '../wp-config-env.php');
-let botToken;
-try {
-    const content = fs.readFileSync(configPath, 'utf8');
-    const match = content.match(/define\('DISCORD_BOT_TOKEN',\s*'([^']+)'\)/);
-    botToken = match?.[1];
-} catch { /* ignore */ }
+const botToken = process.env.DISCORD_BOT_TOKEN;
 
 if (!botToken) {
     console.error('No bot token found — skipping deploy notification');

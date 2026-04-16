@@ -1,28 +1,14 @@
 /**
- * Configuration — reads from environment variables or wp-config-env.php.
+ * Configuration — reads from environment variables.
+ *
+ * In production, systemd loads /opt/nous-bot/.env via EnvironmentFile.
+ * In development, dotenv loads .env from the project root.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-function readPhpDefine(name) {
-    const configPath = path.resolve(__dirname, '../wp-config-env.php');
-    try {
-        const contents = fs.readFileSync(configPath, 'utf8');
-        const match = contents.match(
-            new RegExp(`define\\(\\s*'${name}'\\s*,\\s*'([^']*)'\\s*\\)`)
-        );
-        return match ? match[1] : null;
-    } catch {
-        return null;
-    }
-}
+import 'dotenv/config';
 
 function required(name) {
-    const value = process.env[name] || readPhpDefine(name);
+    const value = process.env[name];
     if (!value) {
         console.error(`Missing required config: ${name}`);
         process.exit(1);
@@ -31,7 +17,7 @@ function required(name) {
 }
 
 function optional(name, fallback = null) {
-    return process.env[name] || readPhpDefine(name) || fallback;
+    return process.env[name] || fallback;
 }
 
 export default {
