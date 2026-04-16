@@ -4,8 +4,7 @@
  * !giveaway start "Prize Name" [duration] [social] [url]  — Start a giveaway
  * !giveaway status                                        — Show current giveaway
  * !giveaway close                                         — Close entries
- * !giveaway draw                                          — Random winner
- * !giveaway draw duckrace                                 — Load entries for stream
+ * Winners drawn exclusively via !spin giveaway or !spin giveaway pick @user
  * !giveaway cancel                                        — Cancel and notify
  * !giveaway test <count>                                  — Create test giveaway with fake entries (owner)
  * !giveaway test clean                                    — Remove test giveaways (owner)
@@ -377,7 +376,7 @@ async function closeGiveawayCommand(message) {
     await closeGiveaway(giveaway.id);
 
     const entryCount = giveaways.getEntryCount.get(giveaway.id).count;
-    await message.channel.send(`\uD83D\uDD34 **Giveaway #${giveaway.id} closed.** ${entryCount} entries. Use \`!spin giveaway\` or \`!giveaway draw\` to pick a winner.`);
+    await message.channel.send(`\uD83D\uDD34 **Giveaway #${giveaway.id} closed.** ${entryCount} entries. Use \`!spin giveaway\` to draw a winner.`);
 }
 
 async function drawWinner(message, args) {
@@ -413,7 +412,7 @@ async function drawWinner(message, args) {
             .setTitle(`\uD83E\uDD86 Duck Race Roster \u2014 ${giveaway.prize_name}`)
             .setDescription(`${entries.length} entrants loaded from Giveaway #${giveaway.id}:\n\n${roster}${overflow}`)
             .setColor(0xceff00)
-            .setFooter({ text: 'Use !spin giveaway to draw, or !giveaway draw for instant random pick.' });
+            .setFooter({ text: 'Use !spin giveaway to draw a winner.' });
 
         await message.channel.send({ embeds: [embed] });
         return;

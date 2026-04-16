@@ -51,7 +51,7 @@ const OVERRIDE_KEYS = [
 // =========================================================================
 
 function buildTestMessage(content, testChannel, mentionUser = null) {
-    return {
+    const msg = {
         content,
         author: { id: 'test_runner', bot: true },
         member: { roles: { cache: { has: () => true } } },
@@ -60,7 +60,14 @@ function buildTestMessage(content, testChannel, mentionUser = null) {
         reply: (c) => testChannel.send(c),
         reference: null,
         delete: async () => {},
+        react: async () => {},
     };
+    // awaitReactions auto-confirms (simulates ✅ react from owner)
+    msg.awaitReactions = async () => ({
+        size: 1,
+        first: () => ({ emoji: { name: '✅' } }),
+    });
+    return msg;
 }
 
 function buildTestMention(userId = TEST_USER_ID) {
@@ -163,7 +170,18 @@ async function runCardNightFlow(testChannel) {
             const products = await stripe.products.search({ query: 'active:"true"', limit: 1 });
             if (products.data.length) realProductName = products.data[0].name;
         } catch { /* use fallback */ }
+
+        // Hype uses awaitReactions on its confirmation message for ✅.
+        // We set author.id to the bot so the filter passes when the bot reacts.
+        // The bot auto-reacts ✅ on the confirmation message before awaiting.
         const msg = buildTestMessage(`!hype ${realProductName}`, testChannel);
+        msg.author.id = client.user.id;
+        // Also need createMessageCollector on the channel
+        msg.channel.createMessageCollector = () => ({
+            on: (event, cb) => {
+                if (event === 'end') setTimeout(() => cb(null, 'time'), 100);
+            },
+        });
         await handleHype(msg, [realProductName]);
     }));
 
@@ -524,13 +542,13 @@ async function runCardNightFlow(testChannel) {
 
     // --- SHIPPING & INTERNATIONAL ---
     results.push(await step('!intl @rhapttv CA', async () => {
-        const msg = buildTestMessage('!intl @rhapttv CA', testChannel, rhapttv);
-        await handleIntl(msg, ['@rhapttv', 'CA']);
+        const msg = buildTestMessage(`!intl <@${TEST_USER_ID}> CA`, testChannel, rhapttv);
+        await handleIntl(msg, [`<@${TEST_USER_ID}>`, 'CA']);
     }));
 
     results.push(await step('!intl @rhapttv (check)', async () => {
-        const msg = buildTestMessage('!intl @rhapttv', testChannel, rhapttv);
-        await handleIntl(msg, ['@rhapttv']);
+        const msg = buildTestMessage(`!intl <@${TEST_USER_ID}>`, testChannel, rhapttv);
+        await handleIntl(msg, [`<@${TEST_USER_ID}>`]);
     }));
 
     results.push(await step('!intl list', async () => {
@@ -551,8 +569,8 @@ async function runCardNightFlow(testChannel) {
     }));
 
     results.push(await step('!intl @rhapttv US (revert)', async () => {
-        const msg = buildTestMessage('!intl @rhapttv US', testChannel, rhapttv);
-        await handleIntl(msg, ['@rhapttv', 'US']);
+        const msg = buildTestMessage(`!intl <@${TEST_USER_ID}> US`, testChannel, rhapttv);
+        await handleIntl(msg, [`<@${TEST_USER_ID}>`, 'US']);
     }));
 
     // --- END OF STREAM ---
@@ -743,10 +761,15 @@ async function handleTest(message, args) {
             await postResultsEmbed(testChannel, results, 'Giveaway & Spin');
         }
 
-        // Reset at the end
+        // Reset at the end — set author.id to bot so the auto-react ✅ passes the filter
         await testChannel.send('🔄 Running `!reset` to clean up...');
         const resetMsg = buildTestMessage('!reset', testChannel);
-        // Bypass confirmation by directly executing reset logic
+        resetMsg.author.id = client.user.id;
+        resetMsg.channel.createMessageCollector = () => ({
+            on: (event, cb) => {
+                if (event === 'end') setTimeout(() => cb(null, 'time'), 100);
+            },
+        });
         await handleReset(resetMsg);
     } finally {
         clearChannelOverrides();
@@ -776,6 +799,12 @@ async function runTestSuite(flow) {
 
         await testChannel.send('🔄 Running `!reset` to clean up...');
         const resetMsg = buildTestMessage('!reset', testChannel);
+        resetMsg.author.id = client.user.id;
+        resetMsg.channel.createMessageCollector = () => ({
+            on: (event, cb) => {
+                if (event === 'end') setTimeout(() => cb(null, 'time'), 100);
+            },
+        });
         await handleReset(resetMsg);
     } finally {
         clearChannelOverrides();
