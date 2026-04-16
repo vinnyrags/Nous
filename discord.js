@@ -28,6 +28,10 @@ function clearChannelOverrides() {
     channelOverrides.clear();
 }
 
+function isChannelOverridden(key) {
+    return channelOverrides.has(key);
+}
+
 /**
  * Get a text channel by its config key. Respects test overrides.
  */
@@ -120,6 +124,7 @@ export {
     getChannel,
     setChannelOverride,
     clearChannelOverrides,
+    isChannelOverridden,
     getGuild,
     sendToChannel,
     sendEmbed,

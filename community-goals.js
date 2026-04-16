@@ -8,7 +8,7 @@
  */
 
 import { EmbedBuilder } from 'discord.js';
-import { client, getChannel } from './discord.js';
+import { client, getChannel, isChannelOverridden } from './discord.js';
 import config from './config.js';
 import { goals } from './db.js';
 
@@ -137,8 +137,10 @@ async function updatePinnedMessage(goal) {
     } catch {
         // Create new message and pin it
         const msg = await channel.send({ embeds: [embed] });
-        await msg.pin();
-        goals.setMessageId.run(msg.id);
+        if (!isChannelOverridden('COMMUNITY_GOALS')) {
+            await msg.pin();
+            goals.setMessageId.run(msg.id);
+        }
     }
 }
 
