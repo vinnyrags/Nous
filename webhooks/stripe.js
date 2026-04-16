@@ -16,7 +16,7 @@ import { db, purchases, battles, cardListings, listSessions, discordLinks } from
 import { client, sendToChannel, sendEmbed, getMember, getGuild, findMemberByUsername, addRole, hasRole } from '../discord.js';
 import { addToQueue } from '../commands/queue.js';
 import { updateBattleMessage } from '../commands/battle.js';
-import { clearExpiryTimer, updateListingEmbed, updateListSessionEmbed } from '../commands/card-shop.js';
+import { clearExpiryTimer, clearListingTtl, updateListingEmbed, updateListSessionEmbed } from '../commands/card-shop.js';
 import { addRevenue } from '../community-goals.js';
 import { recordShipping } from '../shipping.js';
 import { recordPullPurchase } from '../commands/pull.js';
@@ -393,8 +393,9 @@ async function checkCardSalePayment(session, discordUserId, lineItems = []) {
 
     cardListings.markSold.run(listingId);
 
-    // Clear expiry timer and update embed
+    // Clear expiry timer and TTL, then update embed
     clearExpiryTimer(listingId);
+    clearListingTtl(listingId);
 
     const updated = cardListings.getById.get(listingId);
 

@@ -21,7 +21,7 @@ import { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } from
 import Stripe from 'stripe';
 import config from '../config.js';
 import { purchases, cardListings, listSessions, battles, giveaways } from '../db.js';
-import { startExpiryTimer, updateListingEmbed, updateListSessionEmbed } from './card-shop.js';
+import { startExpiryTimer, clearListingTtl, updateListingEmbed, updateListSessionEmbed } from './card-shop.js';
 import { handleGiveawayEntry } from './giveaway.js';
 import {
     hasShippingCoveredByDiscordId,
@@ -181,6 +181,7 @@ async function handleCardBuy(interaction, listingId) {
         }
         const reserved = cardListings.getById.get(listingId);
         await updateListingEmbed(reserved);
+        clearListingTtl(listingId); // Pause TTL — reservation expiry takes over
         startExpiryTimer(listingId);
     }
 

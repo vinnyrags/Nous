@@ -44,6 +44,7 @@ vi.mock('../config.js', () => ({
             INTERNATIONAL: 2500,
         },
         CARD_RESERVATION_MS: 30 * 60 * 1000,
+        CARD_LISTING_TTL_MS: 2 * 60 * 60 * 1000,
     },
 }));
 
@@ -480,6 +481,42 @@ describe('expiry timer', () => {
         const relisted = stmts.cardListings.getById.get(1);
         expect(relisted.status).toBe('active');
         expect(relisted.buyer_discord_id).toBeNull();
+    });
+});
+
+describe('standalone listing auto-relist and TTL', () => {
+    it('auto-relists a standalone open listing after reservation expiry (DB level)', () => {
+        // Simulate !sell "Card" 25.00 → someone reserves → 30-min expiry → auto-relist
+        stmts.cardListings.create.run('Open Card', 2500, null, 'active');
+        stmts.cardListings.setMessageId.run('msg_open', 1);
+
+        // Someone reserves it
+        stmts.cardListings.reserveForBuyer.run('buyer1', 1);
+        expect(stmts.cardListings.getById.get(1).status).toBe('reserved');
+
+        // Reservation expires — relist instead of expire
+        stmts.cardListings.relistAsActive.run(1);
+        const relisted = stmts.cardListings.getById.get(1);
+        expect(relisted.status).toBe('active');
+        expect(relisted.buyer_discord_id).toBeNull();
+    });
+
+    it('TTL expires an untouched standalone listing (DB level)', () => {
+        // Simulate !sell "Card" 25.00 → no one buys → 2-hour TTL fires
+        stmts.cardListings.create.run('Stale Card', 1000, null, 'active');
+
+        // TTL fires
+        stmts.cardListings.markExpired.run(1);
+        expect(stmts.cardListings.getById.get(1).status).toBe('expired');
+    });
+
+    it('targeted !sell @user listing stays expired after reservation expiry (DB level)', () => {
+        // Simulate !sell @user "Card" 25.00 → buyer doesn't pay → stays expired
+        stmts.cardListings.create.run('Targeted Card', 2000, 'buyer1', 'reserved');
+
+        // Reservation expires — targeted listing dies
+        stmts.cardListings.markExpired.run(1);
+        expect(stmts.cardListings.getById.get(1).status).toBe('expired');
     });
 });
 

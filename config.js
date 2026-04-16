@@ -71,6 +71,7 @@ export default {
         INTERNATIONAL: 2500,    // $25
     },
     CARD_RESERVATION_MS: 30 * 60 * 1000,
+    CARD_LISTING_TTL_MS: 2 * 60 * 60 * 1000, // 2 hours
 
     // Role IDs
     ROLES: {

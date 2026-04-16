@@ -74,9 +74,9 @@ const messages = [
     {
         title: '🃏 Card Shop',
         description: [
-            '**`!sell "Card Name" 25.00`** — List a card for open purchase in #card-shop. Posts a "Buy Now" button — buyer clicks, bot checks shipping status, creates personalized checkout.',
+            '**`!sell "Card Name" 25.00`** — List a card for open purchase in #card-shop. Posts a "Buy Now" button — buyer clicks, bot checks shipping status, creates personalized checkout. Listing stays active for 2 hours. If a buyer reserves but doesn\'t pay within 30 minutes, the card auto-relists with a fresh 2-hour window.',
             '',
-            '**`!sell @buyer "Card Name" 25.00`** — Reserve a card for a specific buyer. Posts listing in #card-shop, DMs buyer a Buy Now button with identity capture. 30-minute reservation expiry.',
+            '**`!sell @buyer "Card Name" 25.00`** — Reserve a card for a specific buyer. Posts listing in #card-shop, DMs buyer a Buy Now button with identity capture. 30-minute reservation expiry — if they don\'t pay, the listing expires permanently.',
             '',
             '**`!list open`** — Open a new batch card list session. Posts a summary embed in #card-shop that updates in real-time as cards are added and sold.',
             '',

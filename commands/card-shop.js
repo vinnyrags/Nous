@@ -19,6 +19,9 @@ import { formatShippingRate, getShippingLabel, hasShippingCoveredByDiscordId } f
 // In-memory expiry timers: listingId → timeoutId
 const expiryTimers = new Map();
 
+// In-memory TTL timers: listingId → timeoutId (2-hour listing lifetime)
+const listingTtlTimers = new Map();
+
 /**
  * Format cents as dollars.
  */
@@ -143,7 +146,17 @@ function startExpiryTimer(listingId) {
             }
         }
 
-        // Standalone listing — mark expired as before
+        // Standalone open listing (!sell without user) — auto-relist and restart TTL
+        if (!listing.buyer_dm_message_id) {
+            cardListings.relistAsActive.run(listingId);
+            const relisted = cardListings.getById.get(listingId);
+            await updateListingEmbed(relisted);
+            startListingTtl(listingId);
+            console.log(`Card listing #${listingId} reservation lapsed — relisted with fresh 2-hour TTL`);
+            return;
+        }
+
+        // Targeted !sell @user — mark expired as before
         cardListings.markExpired.run(listingId);
 
         const expired = cardListings.getById.get(listingId);
@@ -185,6 +198,42 @@ function clearExpiryTimer(listingId) {
 }
 
 /**
+ * Start a 2-hour TTL timer for a standalone active listing.
+ * When it fires, the listing expires permanently (embed updated, button removed).
+ * Paused while the listing is reserved (30-min expiry handles that).
+ * Restarted fresh after an auto-relist.
+ */
+function startListingTtl(listingId) {
+    clearListingTtl(listingId);
+
+    const timer = setTimeout(async () => {
+        listingTtlTimers.delete(listingId);
+
+        const listing = cardListings.getById.get(listingId);
+        if (!listing || listing.status !== 'active') return;
+
+        cardListings.markExpired.run(listingId);
+        const expired = cardListings.getById.get(listingId);
+        await updateListingEmbed(expired);
+
+        console.log(`Card listing #${listingId} TTL expired — removed after 2 hours`);
+    }, config.CARD_LISTING_TTL_MS);
+
+    listingTtlTimers.set(listingId, timer);
+}
+
+/**
+ * Clear an active TTL timer.
+ */
+function clearListingTtl(listingId) {
+    const timer = listingTtlTimers.get(listingId);
+    if (timer) {
+        clearTimeout(timer);
+        listingTtlTimers.delete(listingId);
+    }
+}
+
+/**
  * Post a standalone active listing with a Buy Now button in #card-shop.
  * Shared by !sell (no buyer) path.
  */
@@ -209,6 +258,9 @@ async function postActiveListing(message, cardName, priceCents) {
     const row = new ActionRowBuilder().addComponents(buyButton);
     const msg = await channel.send({ embeds: [embed], components: [row] });
     cardListings.setMessageId.run(msg.id, listingId);
+
+    // Start 2-hour TTL — listing expires if no one buys
+    startListingTtl(listingId);
 
     if (message.channel.id !== channel.id) {
         await message.channel.send(`✅ Listed **${cardName}** for ${formatPrice(priceCents)} in <#${config.CHANNELS.CARD_SHOP}>.`);
@@ -534,6 +586,7 @@ async function handleSold(message, args) {
     // Mark sold and update
     cardListings.markSold.run(listing.id);
     clearExpiryTimer(listing.id);
+    clearListingTtl(listing.id);
 
     const updated = cardListings.getById.get(listing.id);
 
@@ -554,7 +607,10 @@ export {
     handleSold,
     startExpiryTimer,
     clearExpiryTimer,
+    startListingTtl,
+    clearListingTtl,
     updateListingEmbed,
     updateListSessionEmbed,
     expiryTimers as _expiryTimers,
+    listingTtlTimers as _listingTtlTimers,
 };
