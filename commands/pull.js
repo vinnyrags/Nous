@@ -14,7 +14,7 @@
 import { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } from 'discord.js';
 import config from '../config.js';
 import { cardListings, pullEntries } from '../db.js';
-import { client } from '../discord.js';
+import { client, getChannel } from '../discord.js';
 import { formatShippingRate } from '../shipping.js';
 
 /**
@@ -76,7 +76,7 @@ async function handlePullOpen(message) {
     const result = cardListings.create.run(name, priceCents, null, 'pull');
     const listingId = Number(result.lastInsertRowid);
 
-    const channel = client.channels.cache.get(config.CHANNELS.CARD_SHOP);
+    const channel = getChannel('CARD_SHOP');
     if (!channel) {
         return message.reply('Card shop channel not found. Check config.');
     }
@@ -111,7 +111,7 @@ async function handlePullClose(message) {
     // Update embed — remove button, show final count + entries
     const entries = pullEntries.getEntries.all(pull.id);
     try {
-        const channel = client.channels.cache.get(config.CHANNELS.CARD_SHOP);
+        const channel = getChannel('CARD_SHOP');
         if (channel && pull.message_id) {
             const msg = await channel.messages.fetch(pull.message_id);
             const entryLines = entries.map((e, i) => {
@@ -202,7 +202,7 @@ async function recordPullPurchase(listingId, discordUserId = null, customerEmail
 
     // Update embed with entries list
     try {
-        const channel = client.channels.cache.get(config.CHANNELS.CARD_SHOP);
+        const channel = getChannel('CARD_SHOP');
         if (!channel) return;
 
         const entries = pullEntries.getEntries.all(listingId);

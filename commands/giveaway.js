@@ -252,15 +252,13 @@ async function handleGiveaway(message, args) {
             return startGiveaway(message, args.slice(1));
         case 'close':
             return closeGiveawayCommand(message);
-        case 'draw':
-            return drawWinner(message, args.slice(1));
         case 'cancel':
             return cancelGiveaway(message);
         case 'test':
             if (!isOwner) return message.reply('Owner only.');
             return handleTest(message, args.slice(1));
         default:
-            return message.reply('Usage: `!giveaway start "Prize" [24h] [social] [url]`, `!giveaway close`, `!giveaway draw [duckrace]`, `!giveaway cancel`');
+            return message.reply('Usage: `!giveaway start "Prize" [24h] [social] [url]`, `!giveaway close`, `!giveaway cancel` — use `!spin giveaway` to draw a winner');
     }
 }
 

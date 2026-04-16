@@ -8,7 +8,7 @@
  */
 
 import { EmbedBuilder } from 'discord.js';
-import { client } from './discord.js';
+import { client, getChannel } from './discord.js';
 import config from './config.js';
 import { goals } from './db.js';
 
@@ -121,7 +121,7 @@ async function addRevenue(amountCents) {
  * Update (or create) the pinned message in #restock-tracker.
  */
 async function updatePinnedMessage(goal) {
-    const channel = client.channels.cache.get(config.CHANNELS.COMMUNITY_GOALS);
+    const channel = getChannel('COMMUNITY_GOALS');
     if (!channel) return;
 
     const embed = buildGoalEmbed(goal || goals.get.get());
@@ -146,7 +146,7 @@ async function updatePinnedMessage(goal) {
  * Announce a completed restock cycle in #restock-tracker.
  */
 async function announceRestock(cycleNumber) {
-    const channel = client.channels.cache.get(config.CHANNELS.COMMUNITY_GOALS);
+    const channel = getChannel('COMMUNITY_GOALS');
     if (!channel) return;
 
     const embed = new EmbedBuilder()
@@ -172,10 +172,10 @@ async function announceMilestone(label) {
         )
         .setColor(0xceff00);
 
-    const goalsChannel = client.channels.cache.get(config.CHANNELS.COMMUNITY_GOALS);
+    const goalsChannel = getChannel('COMMUNITY_GOALS');
     if (goalsChannel) await goalsChannel.send({ embeds: [embed] });
 
-    const announcements = client.channels.cache.get(config.CHANNELS.ANNOUNCEMENTS);
+    const announcements = getChannel('ANNOUNCEMENTS');
     if (announcements) await announcements.send({ embeds: [embed] });
 }
 

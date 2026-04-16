@@ -347,6 +347,22 @@ app.get('/health', (req, res) => {
     res.json({ status: 'ok', uptime: process.uptime() });
 });
 
+// =========================================================================
+// Test suite endpoint
+// =========================================================================
+
+app.post('/test/run', async (req, res) => {
+    try {
+        const { runTestSuite } = await import('./commands/test.js');
+        const flow = req.query.flow || undefined;
+        const results = await runTestSuite(flow);
+        const passed = results.filter(r => r.passed).length;
+        res.json({ passed, total: results.length, results });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 /**
  * Start the Express server.
  */

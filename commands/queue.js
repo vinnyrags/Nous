@@ -21,7 +21,7 @@
 import { EmbedBuilder } from 'discord.js';
 import config from '../config.js';
 import { queues } from '../db.js';
-import { client, sendEmbed, getMember, addRole } from '../discord.js';
+import { client, getChannel, sendEmbed, getMember, addRole } from '../discord.js';
 
 // =========================================================================
 // Queue commands
@@ -251,7 +251,7 @@ async function runAnimatedRace(message, pickedWinnerId) {
         const frames = generateRaceFrames(uniqueBuyers, winnerId, 5);
 
         // Post initial "starting" embed to #queue
-        const queueChannel = client.channels.cache.get(config.CHANNELS.QUEUE);
+        const queueChannel = getChannel('QUEUE');
         if (!queueChannel) {
             raceInProgress = false;
             return message.reply('Cannot find #queue channel.');
@@ -429,7 +429,7 @@ async function declareDuckRaceWinner(message, args) {
  */
 async function postQueueChannelEmbed(queue) {
     try {
-        const channel = client.channels.cache.get(config.CHANNELS.QUEUE);
+        const channel = getChannel('QUEUE');
         if (!channel) return;
 
         const entries = queues.getEntries.all(queue.id);
@@ -453,7 +453,7 @@ async function updateQueueChannelEmbed(queueId) {
         const queue = queues.getQueueById.get(queueId);
         if (!queue) return;
 
-        const channel = client.channels.cache.get(config.CHANNELS.QUEUE);
+        const channel = getChannel('QUEUE');
         if (!channel) return;
 
         const entries = queues.getEntries.all(queue.id);

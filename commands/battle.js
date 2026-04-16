@@ -16,7 +16,7 @@ import { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } from 'disc
 import Stripe from 'stripe';
 import config from '../config.js';
 import { db, battles, purchases } from '../db.js';
-import { client, sendToChannel, sendEmbed, getMember, addRole, getGuild } from '../discord.js';
+import { client, getChannel, sendToChannel, sendEmbed, getMember, addRole, getGuild } from '../discord.js';
 import { hasShippingCoveredByDiscordId, getShippingRate, formatShippingRate } from '../shipping.js';
 
 /**
@@ -25,7 +25,7 @@ import { hasShippingCoveredByDiscordId, getShippingRate, formatShippingRate } fr
  */
 async function updateBattleMessage(battle, entries, paidEntries, status) {
     try {
-        const channel = client.channels.cache.get(config.CHANNELS.PACK_BATTLES);
+        const channel = getChannel('PACK_BATTLES');
         const messageId = battle.channel_message_id || battles.getBattleById.get(battle.id)?.channel_message_id;
         if (!channel || !messageId) return;
 
@@ -190,7 +190,7 @@ async function startBattle(message, args) {
         .setEmoji('🛒');
 
     const row = new ActionRowBuilder().addComponents(buyButton);
-    const battleChannel = client.channels.cache.get(config.CHANNELS.PACK_BATTLES);
+    const battleChannel = getChannel('PACK_BATTLES');
     const msg = await battleChannel.send({ embeds: [embed], components: [row] });
     battles.setBattleMessage.run(msg.id, battleId);
 

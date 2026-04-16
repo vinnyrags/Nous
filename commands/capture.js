@@ -10,7 +10,7 @@
 import { EmbedBuilder } from 'discord.js';
 import config from '../config.js';
 import { livestream } from '../db.js';
-import { client } from '../discord.js';
+import { client, getChannel } from '../discord.js';
 
 async function handleCapture(message, args) {
     if (!message.member.roles.cache.has(config.ROLES.AKIVILI)) return;
@@ -60,7 +60,7 @@ async function handleCapture(message, args) {
         embed.setDescription(lines.join('\n'));
     }
 
-    const channel = client.channels.cache.get(config.CHANNELS.MOMENTS);
+    const channel = getChannel('MOMENTS');
     if (channel) {
         await channel.send({ embeds: [embed] });
     }

@@ -39,6 +39,7 @@ vi.mock('../discord.js', () => ({
             },
         },
     },
+    getChannel: vi.fn(),
 }));
 
 vi.mock('../config.js', () => ({
@@ -63,7 +64,7 @@ vi.mock('../livestream-flow.js', () => ({
     ],
 }));
 
-const { client } = await import('../discord.js');
+const { client, getChannel } = await import('../discord.js');
 const { syncBotCommands } = await import('../sync-bot-commands.js');
 
 beforeEach(() => {
@@ -75,9 +76,9 @@ beforeEach(() => {
 function setupChannels(botEmbeds = [], flowEmbeds = []) {
     mockBotCommandsChannel = createMockChannel(botEmbeds);
     mockFlowChannel = createMockChannel(flowEmbeds);
-    client.channels.cache.get.mockImplementation((id) => {
-        if (id === 'bot-commands-id') return mockBotCommandsChannel;
-        if (id === 'livestream-flow-id') return mockFlowChannel;
+    getChannel.mockImplementation((key) => {
+        if (key === 'BOT_COMMANDS') return mockBotCommandsChannel;
+        if (key === 'LIVESTREAM_FLOW') return mockFlowChannel;
         return undefined;
     });
 }
@@ -156,7 +157,7 @@ describe('syncBotCommands', () => {
     });
 
     it('skips sync when channel not found', async () => {
-        client.channels.cache.get.mockReturnValue(undefined);
+        getChannel.mockReturnValue(undefined);
         await syncBotCommands();
         // Should not throw
     });

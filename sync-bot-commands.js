@@ -7,7 +7,7 @@
  */
 
 import { EmbedBuilder } from 'discord.js';
-import { client } from './discord.js';
+import { client, getChannel } from './discord.js';
 import config from './config.js';
 import commandMessages from './bot-commands.js';
 import flowMessages from './livestream-flow.js';
@@ -39,7 +39,7 @@ function embedMatches(message, desired) {
  * Sync a channel's messages with an array of embed definitions.
  */
 async function syncChannel(channelKey, desiredMessages, label) {
-    const channel = client.channels.cache.get(config.CHANNELS[channelKey]);
+    const channel = getChannel(channelKey);
     if (!channel) {
         console.error(`${label} channel not found — skipping sync`);
         return;

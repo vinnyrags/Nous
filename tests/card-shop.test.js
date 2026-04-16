@@ -58,24 +58,26 @@ vi.mock('../db.js', () => {
     };
 });
 
-vi.mock('../discord.js', () => ({
-    client: {
-        channels: {
-            cache: {
-                get: vi.fn().mockReturnValue({
-                    id: '1488977861237801231',
-                    send: vi.fn().mockResolvedValue({ id: 'embed_msg_1', edit: vi.fn() }),
-                    messages: { fetch: vi.fn().mockResolvedValue({ edit: vi.fn() }) },
-                }),
+vi.mock('../discord.js', () => {
+    const mockChannel = {
+        id: '1488977861237801231',
+        send: vi.fn().mockResolvedValue({ id: 'embed_msg_1', edit: vi.fn() }),
+        messages: { fetch: vi.fn().mockResolvedValue({ edit: vi.fn() }) },
+    };
+    return {
+        client: {
+            channels: {
+                cache: { get: vi.fn().mockReturnValue(mockChannel) },
             },
         },
-    },
-    getMember: vi.fn().mockResolvedValue({
-        createDM: vi.fn().mockResolvedValue({
-            send: vi.fn().mockResolvedValue({}),
+        getChannel: vi.fn().mockReturnValue(mockChannel),
+        getMember: vi.fn().mockResolvedValue({
+            createDM: vi.fn().mockResolvedValue({
+                send: vi.fn().mockResolvedValue({}),
+            }),
         }),
-    }),
-}));
+    };
+});
 
 vi.mock('../shipping.js', () => ({
     formatShippingRate: vi.fn((amount) => `$${(amount / 100).toFixed(2)}`),

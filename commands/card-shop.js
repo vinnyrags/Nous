@@ -13,7 +13,7 @@
 import { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, StringSelectMenuBuilder } from 'discord.js';
 import config from '../config.js';
 import { cardListings, listSessions } from '../db.js';
-import { client, getMember } from '../discord.js';
+import { client, getChannel, getMember } from '../discord.js';
 import { formatShippingRate, getShippingLabel, hasShippingCoveredByDiscordId } from '../shipping.js';
 
 // In-memory expiry timers: listingId → timeoutId
@@ -87,7 +87,7 @@ function buildListingEmbed(listing) {
  */
 async function updateListingEmbed(listing) {
     try {
-        const channel = client.channels.cache.get(config.CHANNELS.CARD_SHOP);
+        const channel = getChannel('CARD_SHOP');
         if (!channel || !listing.message_id) return;
         const msg = await channel.messages.fetch(listing.message_id);
 
@@ -241,7 +241,7 @@ async function postActiveListing(message, cardName, priceCents) {
     const result = cardListings.create.run(cardName, priceCents, null, 'active');
     const listingId = Number(result.lastInsertRowid);
 
-    const channel = client.channels.cache.get(config.CHANNELS.CARD_SHOP);
+    const channel = getChannel('CARD_SHOP');
     if (!channel) {
         return message.reply('Card shop channel not found. Check config.');
     }
@@ -308,7 +308,7 @@ async function handleSell(message, args) {
     const listingId = Number(result.lastInsertRowid);
 
     // Post embed in #card-shop
-    const channel = client.channels.cache.get(config.CHANNELS.CARD_SHOP);
+    const channel = getChannel('CARD_SHOP');
     if (!channel) {
         return message.reply('Card shop channel not found. Check config.');
     }
@@ -427,7 +427,7 @@ function buildListSessionSelectMenu(session, items) {
  */
 async function updateListSessionEmbed(session) {
     try {
-        const channel = client.channels.cache.get(config.CHANNELS.CARD_SHOP);
+        const channel = getChannel('CARD_SHOP');
         if (!channel || !session.message_id) return;
 
         const items = cardListings.getBySessionId.all(session.id);
@@ -457,7 +457,7 @@ async function handleListOpen(message) {
     const sessionId = Number(result.lastInsertRowid);
     const session = listSessions.getById.get(sessionId);
 
-    const channel = client.channels.cache.get(config.CHANNELS.CARD_SHOP);
+    const channel = getChannel('CARD_SHOP');
     if (!channel) {
         return message.reply('Card shop channel not found. Check config.');
     }
