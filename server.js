@@ -15,6 +15,7 @@ import config from './config.js';
 import { battles, cardListings, purchases, discordLinks } from './db.js';
 import { handleCheckoutCompleted } from './webhooks/stripe.js';
 import { handleTwitchWebhook } from './webhooks/twitch.js';
+import { handleShippingEasyWebhook } from './webhooks/shippingeasy.js';
 import {
     isInternationalByEmail,
     hasShippingCoveredByDiscordId,
@@ -85,6 +86,12 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
 app.post('/webhooks/twitch', express.json({
     verify: (req, res, buf) => { req.rawBody = buf.toString(); },
 }), handleTwitchWebhook);
+
+// =========================================================================
+// ShippingEasy webhook — tracking info from label purchases
+// =========================================================================
+
+app.post('/webhooks/shippingeasy', express.json(), handleShippingEasyWebhook);
 
 // =========================================================================
 // Pack battle direct checkout — creates a Stripe session and redirects

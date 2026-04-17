@@ -35,6 +35,7 @@ vi.mock('../db.js', () => ({
         getUnshipped: { all: vi.fn() },
         getUnshippedNoDiscord: { all: vi.fn() },
         markShipped: { run: vi.fn() },
+        getEmailByDiscordId: { get: vi.fn().mockReturnValue(null) },
     },
     discordLinks: {
         getCountry: { get: vi.fn().mockReturnValue(null) },
@@ -45,6 +46,9 @@ vi.mock('../db.js', () => ({
     },
     shipping: {
         getByEmailThisMonth: { get: vi.fn().mockReturnValue(null) },
+    },
+    tracking: {
+        getRecentByEmail: { get: vi.fn().mockReturnValue(null) },
     },
 }));
 

@@ -35,6 +35,10 @@ export default {
     TWITCH_WEBHOOK_SECRET: optional('TWITCH_WEBHOOK_SECRET'),
     TWITCH_BROADCASTER_ID: optional('TWITCH_BROADCASTER_ID'),
 
+    // ShippingEasy
+    SHIPPINGEASY_API_KEY: optional('SHIPPINGEASY_API_KEY'),
+    SHIPPINGEASY_API_SECRET: optional('SHIPPINGEASY_API_SECRET'),
+
     // Server
     PORT: parseInt(process.env.BOT_PORT || '3100', 10),
     SHOP_URL: optional('SHOP_URL', 'https://vincentragosta.io/shop'),

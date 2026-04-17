@@ -154,7 +154,7 @@ async function handleCheckoutCompleted(session) {
                 const totalDollars = (totalAmount / 100).toFixed(2);
                 const embed = new EmbedBuilder()
                     .setTitle('🧾 Purchase Receipt')
-                    .setDescription(`${itemList}\n\n**Total:** $${totalDollars}`)
+                    .setDescription(`${itemList}\n\n**Total:** $${totalDollars}\n\n📅 Orders ship weekly — expect delivery 5-7 business days after shipping`)
                     .setColor(0xceff00)
                     .setFooter({ text: 'Thank you for your purchase!' });
 

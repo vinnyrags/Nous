@@ -187,6 +187,17 @@ export function createTestDb() {
             closed_at TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS tracking (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_email TEXT NOT NULL,
+            discord_user_id TEXT,
+            tracking_number TEXT NOT NULL,
+            carrier TEXT,
+            carrier_service TEXT,
+            tracking_url TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
         CREATE TABLE IF NOT EXISTS active_coupons (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             promo_code TEXT NOT NULL,

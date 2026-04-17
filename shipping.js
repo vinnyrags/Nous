@@ -103,7 +103,7 @@ function formatShippingRate(amountCents) {
 function getShippingLabel(discordUserId) {
     const intl = isInternational(discordUserId);
     const rate = intl ? config.SHIPPING.INTERNATIONAL : config.SHIPPING.DOMESTIC;
-    const label = intl ? 'International Shipping' : 'Standard Shipping (US)';
+    const label = intl ? 'International Shipping — 7-14 business days' : 'Standard Shipping (US) — 5-7 business days';
     return { rate, label, isInternational: intl };
 }
 
@@ -119,7 +119,7 @@ function buildShippingOptions(discordUserId) {
         shipping_rate_data: {
             type: 'fixed_amount',
             fixed_amount: { amount: config.SHIPPING.DOMESTIC, currency: 'usd' },
-            display_name: 'Standard Shipping (US)',
+            display_name: 'Standard Shipping — 5-7 business days',
         },
     };
 
@@ -127,7 +127,7 @@ function buildShippingOptions(discordUserId) {
         shipping_rate_data: {
             type: 'fixed_amount',
             fixed_amount: { amount: config.SHIPPING.INTERNATIONAL, currency: 'usd' },
-            display_name: 'International Shipping',
+            display_name: 'International Shipping — 7-14 business days',
         },
     };
 

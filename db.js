@@ -173,6 +173,17 @@ db.exec(`
         closed_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS tracking (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_email TEXT NOT NULL,
+        discord_user_id TEXT,
+        tracking_number TEXT NOT NULL,
+        carrier TEXT,
+        carrier_service TEXT,
+        tracking_url TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS active_coupons (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         promo_code TEXT NOT NULL,
@@ -802,6 +813,29 @@ const couponStmts = {
 };
 
 // =========================================================================
+// Tracking
+// =========================================================================
+
+const trackingStmts = {
+    add: db.prepare(`
+        INSERT INTO tracking (customer_email, discord_user_id, tracking_number, carrier, carrier_service, tracking_url)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `),
+
+    getByEmail: db.prepare(`
+        SELECT * FROM tracking WHERE customer_email = ? ORDER BY created_at DESC
+    `),
+
+    getByDiscordId: db.prepare(`
+        SELECT * FROM tracking WHERE discord_user_id = ? ORDER BY created_at DESC
+    `),
+
+    getRecentByEmail: db.prepare(`
+        SELECT * FROM tracking WHERE customer_email = ? ORDER BY created_at DESC LIMIT 1
+    `),
+};
+
+// =========================================================================
 // Analytics
 // =========================================================================
 
@@ -885,4 +919,5 @@ export {
     discordLinkStmts as discordLinks,
     welcomeStmts as welcome,
     pullEntryStmts as pullEntries,
+    trackingStmts as tracking,
 };

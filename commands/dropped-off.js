@@ -17,7 +17,7 @@
 
 import { EmbedBuilder } from 'discord.js';
 import config from '../config.js';
-import { purchases, discordLinks, queues, shipping } from '../db.js';
+import { purchases, discordLinks, queues, shipping, tracking } from '../db.js';
 import { getMember, sendEmbed, sendToChannel } from '../discord.js';
 
 async function handleDroppedOff(message, args = []) {
@@ -95,11 +95,28 @@ async function handleDroppedOff(message, args = []) {
             .map(([name, qty]) => qty > 1 ? `• ${name} (×${qty})` : `• ${name}`)
             .join('\n');
 
+        // Look up tracking info for this buyer
+        const link = purchases.getEmailByDiscordId.get(userId);
+        const trackingRecord = link ? tracking.getRecentByEmail.get(link.customer_email) : null;
+
+        let trackingSection;
+        if (trackingRecord) {
+            trackingSection = `\n📬 **Tracking:** ${trackingRecord.tracking_number}`;
+            if (trackingRecord.tracking_url) {
+                trackingSection += `\n🔗 [Track your package](${trackingRecord.tracking_url})`;
+            }
+            if (trackingRecord.carrier) {
+                trackingSection += ` (${trackingRecord.carrier})`;
+            }
+            trackingSection += '\n📅 Expect delivery in 5-7 business days';
+        } else {
+            trackingSection = '\n📅 Expect delivery in 5-7 business days\nNeed tracking? Just reply here and I\'ll get it to you.';
+        }
+
         const embed = new EmbedBuilder()
             .setTitle('📦 Your Order Is On Its Way!')
             .setDescription(
-                `Hey! Your order from itzenzoTTV has been shipped:\n\n${productList}\n\n` +
-                'If you need tracking info, just reach out to me here in the server.'
+                `Hey! Your order from itzenzoTTV has been shipped:\n\n${productList}\n${trackingSection}`
             )
             .setColor(0xceff00)
             .setFooter({ text: `Shipped ${new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' })}` });
@@ -133,8 +150,8 @@ async function handleDroppedOff(message, args = []) {
           'If you placed an international order, check your DMs for details.'
         : `All orders from this week have been dropped off and are on their way!\n\n` +
           `📦 **${unshipped.length + skipped.length} order${unshipped.length + skipped.length !== 1 ? 's' : ''} shipped to ${byUser.size + skipped.length} buyer${byUser.size + skipped.length !== 1 ? 's' : ''}**\n\n` +
-          'If you placed an order, check your DMs for details.\n' +
-          'Reach out if you need tracking info.';
+          '📅 Expect delivery in 5-7 business days\n' +
+          'Check your DMs for tracking info.';
 
     await sendEmbed('ORDER_FEED', {
         title: orderFeedTitle,
