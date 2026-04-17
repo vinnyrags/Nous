@@ -50,6 +50,7 @@ import { handleReset } from './commands/reset.js';
 import { handleSpin } from './commands/spin.js';
 import { handleCapture } from './commands/capture.js';
 import { handleTest } from './commands/test.js';
+import { handleTracking } from './commands/tracking.js';
 import { syncBotCommands } from './sync-bot-commands.js';
 import { initCommunityGoals } from './community-goals.js';
 import { initWelcome } from './commands/welcome.js';
@@ -149,6 +150,9 @@ client.on('messageCreate', async (message) => {
                 break;
             case 'reset':
                 await handleReset(message);
+                break;
+            case 'tracking':
+                await handleTracking(message, args);
                 break;
             case 'test':
                 await handleTest(message, args);

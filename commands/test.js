@@ -30,6 +30,7 @@ import { handleCapture } from './capture.js';
 import { handleIntl } from './intl.js';
 import { handleShipping } from './shipping.js';
 import { handleDroppedOff } from './dropped-off.js';
+import { handleTracking } from './tracking.js';
 import { handleWaive } from './waive.js';
 import { handleRefund } from './refund.js';
 import { handleCheckoutCompleted } from '../webhooks/stripe.js';
@@ -637,8 +638,19 @@ async function runCardNightFlow(testChannel) {
         await handleOffline(msg);
     }));
 
-    // --- POST-STREAM ---
-    results.push(await step('!dropped-off', async () => {
+    // --- TRACKING ---
+    results.push(await step('!tracking @rhapttv (add)', async () => {
+        const msg = buildTestMessage(`!tracking <@${TEST_USER_ID}> 9400111899223847263910 USPS`, testChannel, rhapttv);
+        await handleTracking(msg, [`<@${TEST_USER_ID}>`, '9400111899223847263910', 'USPS']);
+    }));
+
+    results.push(await step('!tracking list', async () => {
+        const msg = buildTestMessage('!tracking list', testChannel);
+        await handleTracking(msg, ['list']);
+    }));
+
+    // --- POST-STREAM (dropped-off should now include tracking) ---
+    results.push(await step('!dropped-off (with tracking)', async () => {
         const msg = buildTestMessage('!dropped-off', testChannel);
         await handleDroppedOff(msg, []);
     }));

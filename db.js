@@ -833,6 +833,10 @@ const trackingStmts = {
     getRecentByEmail: db.prepare(`
         SELECT * FROM tracking WHERE customer_email = ? ORDER BY created_at DESC LIMIT 1
     `),
+
+    getAll: db.prepare(`
+        SELECT * FROM tracking ORDER BY created_at DESC
+    `),
 };
 
 // =========================================================================
