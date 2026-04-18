@@ -690,27 +690,32 @@ async function runCardNightFlow(testChannel) {
         await handleShippingAudit(msg, ['intl']);
     }));
 
-    // --- WAIVE: VIP free shipping ---
-    results.push(await step('!waive @rhapttv (VIP free shipping)', async () => {
+    // --- WAIVE: existing shipping record → tries Stripe refund (Path A) ---
+    results.push(await step('!waive @rhapttv (refund path — Stripe test)', async () => {
+        // rhapttv has shipping records from fake purchases — waive takes Path A
+        // (refund via Stripe). Will fail on fake session IDs but command executes.
+        const msg = buildTestMessage('!waive @rhapttv', testChannel, rhapttv);
+        await handleWaive(msg, ['@rhapttv']);
+    }));
+
+    // --- WAIVE: no shipping record → pre-waiver (Path B) ---
+    results.push(await step('!waive @rhapttv (pre-waiver path)', async () => {
+        // Clear shipping records so waive takes Path B (pre-waiver with $0 record)
+        const link = purchases.getEmailByDiscordId.get(TEST_USER_ID);
+        if (link) {
+            db.prepare('DELETE FROM shipping_payments WHERE customer_email = ?').run(link.customer_email);
+        }
+
         const msg = buildTestMessage('!waive @rhapttv', testChannel, rhapttv);
         await handleWaive(msg, ['@rhapttv']);
 
-        // Verify waiver record created ($0 amount)
-        const link = purchases.getEmailByDiscordId.get(TEST_USER_ID);
+        // Verify $0 waiver record created
         if (link) {
             const record = db.prepare(
-                "SELECT * FROM shipping_payments WHERE customer_email = ? AND amount = 0 ORDER BY created_at DESC LIMIT 1"
+                "SELECT * FROM shipping_payments WHERE customer_email = ? AND amount = 0 AND source = 'waiver' ORDER BY created_at DESC LIMIT 1"
             ).get(link.customer_email);
             if (!record) throw new Error('Waiver record not created');
         }
-    }));
-
-    // --- WAIVE: double-charge refund (buyer already paid, waive refunds + removes) ---
-    results.push(await step('!waive @rhapttv (double-charge fix)', async () => {
-        // rhapttv already has a waiver from previous step — running again exercises
-        // the "already covered" path (which inserts another $0 waiver or handles gracefully)
-        const msg = buildTestMessage('!waive @rhapttv', testChannel, rhapttv);
-        await handleWaive(msg, ['@rhapttv']);
     }));
 
     // --- INTL-SHIP: DM international buyers with unpaid shipping ---
