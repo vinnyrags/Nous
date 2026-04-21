@@ -12,6 +12,7 @@
  */
 
 import { EmbedBuilder } from 'discord.js';
+import crypto from 'node:crypto';
 import Stripe from 'stripe';
 import config from '../config.js';
 import { db, purchases, cardListings, listSessions, battles, queues, giveaways, discordLinks, goals, tracking } from '../db.js';
@@ -1072,25 +1073,37 @@ async function runShippingFlow(testChannel) {
 
     // --- Simulate ShippingEasy webhook with tracking ---
     results.push(await step('Simulate ShippingEasy webhook', async () => {
-        const fakeReq = {
-            method: 'POST',
-            originalUrl: '/webhooks/shippingeasy',
-            headers: {},
-            query: {},
-            body: {
-                event: {
-                    event_type: 'label.purchased',
-                    data: {
-                        shipment: {
-                            tracking_number: 'TEST9400111899223847263910',
-                            tracking_url: 'https://tools.usps.com/go/TrackConfirmAction?tLabels=TEST9400111899223847263910',
-                            carrier: 'USPS',
-                            carrier_service: 'Priority Mail',
-                            order_number: shippedSessionId,
-                        },
+        const webhookBody = {
+            event: {
+                event_type: 'label.purchased',
+                data: {
+                    shipment: {
+                        tracking_number: 'TEST9400111899223847263910',
+                        tracking_url: 'https://tools.usps.com/go/TrackConfirmAction?tLabels=TEST9400111899223847263910',
+                        carrier: 'USPS',
+                        carrier_service: 'Priority Mail',
+                        order_number: shippedSessionId,
                     },
                 },
             },
+        };
+
+        // Compute valid HMAC signature matching verifySignature() logic
+        const method = 'POST';
+        const path = '/webhooks/shippingeasy';
+        const bodyStr = JSON.stringify(webhookBody);
+        const stringToSign = [method, path, bodyStr].filter(Boolean).join('&');
+        const signature = crypto
+            .createHmac('sha256', config.SHIPPINGEASY_API_SECRET)
+            .update(stringToSign)
+            .digest('hex');
+
+        const fakeReq = {
+            method,
+            originalUrl: path,
+            headers: { 'x-se-api-signature': signature },
+            query: {},
+            body: webhookBody,
         };
         const fakeRes = { status: () => ({ send: () => {} }) };
         await handleShippingEasyWebhook(fakeReq, fakeRes);
