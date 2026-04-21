@@ -151,6 +151,7 @@ const messages = [
             '```',
             '',
             '*One payment covers all purchases for the period. Already paid = skipped.*',
+            '*Orders auto-create in ShippingEasy. Tracking auto-imports when labels are purchased.*',
             '',
             '**Quick Links**',
             '```',
