@@ -17,7 +17,14 @@ export function createTestDb() {
             product_name TEXT,
             amount INTEGER,
             created_at TEXT DEFAULT (datetime('now')),
-            shipped_at TEXT
+            shipped_at TEXT,
+            shipping_name TEXT DEFAULT NULL,
+            shipping_address TEXT DEFAULT NULL,
+            shipping_city TEXT DEFAULT NULL,
+            shipping_state TEXT DEFAULT NULL,
+            shipping_postal_code TEXT DEFAULT NULL,
+            shipping_country TEXT DEFAULT NULL,
+            shippingeasy_order_id TEXT DEFAULT NULL
         );
 
         CREATE TABLE IF NOT EXISTS purchase_counts (
@@ -231,6 +238,11 @@ export function buildStmts(db) {
             getRecentByDiscordId: db.prepare(`SELECT * FROM purchases WHERE discord_user_id = ? ORDER BY id DESC LIMIT 1`),
             getRecentsByDiscordId: db.prepare(`SELECT * FROM purchases WHERE discord_user_id = ? ORDER BY id DESC LIMIT 10`),
             getBySessionId: db.prepare(`SELECT * FROM purchases WHERE stripe_session_id = ?`),
+            updateShippingAddress: db.prepare(`UPDATE purchases SET shipping_name = ?, shipping_address = ?, shipping_city = ?, shipping_state = ?, shipping_postal_code = ?, shipping_country = ? WHERE stripe_session_id = ?`),
+            setShippingEasyOrderId: db.prepare(`UPDATE purchases SET shippingeasy_order_id = ? WHERE stripe_session_id = ?`),
+            getPendingShipments: db.prepare(`SELECT p.* FROM purchases p WHERE p.shippingeasy_order_id IS NOT NULL AND p.shipped_at IS NULL AND p.shipping_address IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tracking t WHERE t.customer_email = p.customer_email AND t.created_at >= p.created_at)`),
+            getReadyShipments: db.prepare(`SELECT p.*, t.tracking_number, t.carrier, t.tracking_url FROM purchases p JOIN tracking t ON t.customer_email = p.customer_email AND t.created_at >= p.created_at WHERE p.shippingeasy_order_id IS NOT NULL AND p.shipped_at IS NULL`),
+            getShipmentsByDiscordId: db.prepare(`SELECT p.*, t.tracking_number, t.carrier, t.tracking_url FROM purchases p LEFT JOIN tracking t ON t.customer_email = p.customer_email AND t.created_at >= p.created_at WHERE p.discord_user_id = ? AND p.shipping_address IS NOT NULL ORDER BY p.created_at DESC LIMIT 10`),
         },
         battles: {
             getNextBattleNumber: db.prepare(`SELECT COALESCE(MAX(battle_number), 0) + 1 as next FROM battles WHERE battle_number IS NOT NULL`),

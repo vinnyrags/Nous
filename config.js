@@ -38,6 +38,7 @@ export default {
     // ShippingEasy
     SHIPPINGEASY_API_KEY: optional('SHIPPINGEASY_API_KEY'),
     SHIPPINGEASY_API_SECRET: optional('SHIPPINGEASY_API_SECRET'),
+    SHIPPINGEASY_STORE_API_KEY: optional('SHIPPINGEASY_STORE_API_KEY'),
 
     // Server
     PORT: parseInt(process.env.BOT_PORT || '3100', 10),
@@ -67,6 +68,7 @@ export default {
         DEV_LOG: '1489513907025346630',
         GIVEAWAYS: '1489502926195003532',
         MOMENTS: '1493307443084787984',
+        SHIPPING_LABELS: '1496219727801094359',
         TEST_SUITE: '1494372353172443237',
     },
 

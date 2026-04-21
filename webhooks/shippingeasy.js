@@ -9,6 +9,7 @@
 import crypto from 'node:crypto';
 import config from '../config.js';
 import { tracking, purchases } from '../db.js';
+import { sendEmbed } from '../discord.js';
 
 /**
  * Verify the ShippingEasy webhook signature.
@@ -127,18 +128,23 @@ async function handleShippingEasyWebhook(req, res) {
 
     console.log(`ShippingEasy label.purchased: ${trackingNumber} (${carrier}) for order ${orderNumber}`);
 
-    // Try to match to a buyer via recipient email
+    // Try to match buyer — first by external_order_identifier (Stripe session ID), then by API
     let customerEmail = null;
     let discordUserId = null;
 
     if (orderNumber) {
-        customerEmail = await fetchOrderRecipientEmail(orderNumber);
-    }
-
-    if (customerEmail) {
-        const link = purchases.getDiscordIdByEmail.get(customerEmail);
-        if (link) {
-            discordUserId = link.discord_user_id;
+        // Orders created via our integration use stripe_session_id as external_order_identifier
+        const purchase = purchases.getBySessionId.get(orderNumber);
+        if (purchase) {
+            customerEmail = purchase.customer_email;
+            discordUserId = purchase.discord_user_id;
+        } else {
+            // Fallback to API lookup for orders not created through our integration
+            customerEmail = await fetchOrderRecipientEmail(orderNumber);
+            if (customerEmail) {
+                const link = purchases.getDiscordIdByEmail.get(customerEmail);
+                if (link) discordUserId = link.discord_user_id;
+            }
         }
     }
 
@@ -153,6 +159,20 @@ async function handleShippingEasyWebhook(req, res) {
     );
 
     console.log(`Tracking stored: ${trackingNumber} → ${customerEmail || 'no email'} (${discordUserId || 'no Discord link'})`);
+
+    // Post to #shipping-labels
+    await sendEmbed('SHIPPING_LABELS', {
+        title: '📦 Label Purchased',
+        description: [
+            `**Tracking:** ${trackingNumber}`,
+            trackingUrl ? `**Track:** [Click here](${trackingUrl})` : null,
+            `**Carrier:** ${carrier || 'Unknown'}${carrierService ? ` (${carrierService})` : ''}`,
+            customerEmail ? `**Email:** ${customerEmail}` : null,
+            discordUserId ? `**Buyer:** <@${discordUserId}>` : null,
+        ].filter(Boolean).join('\n'),
+        color: 0x3498db,
+    }).catch(e => console.error('Failed to post to #shipping-labels:', e.message));
+
     res.status(200).send('OK');
 }
 

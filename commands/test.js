@@ -32,9 +32,11 @@ import { handleShippingAudit } from './shipping-audit.js';
 import { handleShipping } from './shipping.js';
 import { handleDroppedOff } from './dropped-off.js';
 import { handleTracking } from './tracking.js';
+import { handleShipments } from './shipments.js';
 import { handleWaive } from './waive.js';
 import { handleRefund } from './refund.js';
 import { handleCheckoutCompleted } from '../webhooks/stripe.js';
+import { handleShippingEasyWebhook } from '../webhooks/shippingeasy.js';
 
 const TEST_USER_ID = '1490206350943191052'; // @rhapttv
 const TEST_EMAIL = 'itzenzottv+testaccount1@gmail.com';
@@ -44,7 +46,7 @@ const TEST_CHANNEL_ID = config.CHANNELS.TEST_SUITE;
 const OVERRIDE_KEYS = [
     'CARD_SHOP', 'ORDER_FEED', 'DEALS', 'QUEUE', 'GIVEAWAYS',
     'ANNOUNCEMENTS', 'ANALYTICS', 'MOMENTS', 'OPS', 'PACK_BATTLES',
-    'COMMUNITY_GOALS',
+    'COMMUNITY_GOALS', 'SHIPPING_LABELS',
 ];
 
 // =========================================================================
@@ -110,10 +112,10 @@ function buildTestInteraction(testChannel, userId = TEST_USER_ID) {
     };
 }
 
-function fakeCheckoutSession({ listingId, name, price, withDiscord = true, stockRemaining = 5, discordUsername = null, shippingCountry = null }) {
+function fakeCheckoutSession({ listingId, name, price, withDiscord = true, stockRemaining = 5, discordUsername = null, shippingCountry = null, shippingAddress = null, source = null }) {
     const session = {
         id: `test_session_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        customer_details: { email: TEST_EMAIL },
+        customer_details: { email: TEST_EMAIL, name: 'Test Buyer' },
         customer_email: TEST_EMAIL,
         amount_total: price,
         amount_subtotal: price,
@@ -125,6 +127,7 @@ function fakeCheckoutSession({ listingId, name, price, withDiscord = true, stock
         custom_fields: [],
     };
     if (withDiscord) session.metadata.discord_user_id = TEST_USER_ID;
+    if (source) session.metadata.source = source;
     if (listingId) {
         session.metadata.source = 'card-sale';
         session.metadata.card_listing_id = String(listingId);
@@ -132,7 +135,9 @@ function fakeCheckoutSession({ listingId, name, price, withDiscord = true, stock
     if (discordUsername) {
         session.custom_fields = [{ key: 'discord_username', text: { value: discordUsername } }];
     }
-    if (shippingCountry) {
+    if (shippingAddress) {
+        session.shipping_details = { address: shippingAddress, name: 'Test Buyer' };
+    } else if (shippingCountry) {
         session.shipping_details = { address: { country: shippingCountry } };
     }
     return session;
@@ -996,6 +1001,139 @@ async function runRaceConditionFlow(testChannel) {
 }
 
 // =========================================================================
+// Flow 4: Shipping Integration
+// =========================================================================
+
+async function runShippingFlow(testChannel) {
+    const results = [];
+    const rhapttv = buildTestMention();
+    let shippedSessionId;
+
+    await testChannel.send({ embeds: [new EmbedBuilder().setTitle('📦 Shipping Integration').setDescription('Starting...').setColor(0xceff00)] });
+
+    // --- Purchase with full shipping address ---
+    results.push(await step('Fake purchase with shipping address', async () => {
+        // Link test account first
+        purchases.linkDiscord.run(TEST_USER_ID, TEST_EMAIL);
+
+        const session = fakeCheckoutSession({
+            name: 'TEST Shipped Product',
+            price: 2000,
+            shippingAddress: {
+                line1: '123 Test St',
+                line2: 'Apt 4',
+                city: 'Brooklyn',
+                state: 'NY',
+                postal_code: '11201',
+                country: 'US',
+            },
+        });
+        session.shipping_cost = { amount_total: 1000 };
+        session.total_details = { amount_shipping: 1000 };
+        shippedSessionId = session.id;
+        await handleCheckoutCompleted(session);
+    }));
+
+    // --- Verify shipping address stored ---
+    results.push(await step('Verify shipping address stored', async () => {
+        const purchase = purchases.getBySessionId.get(shippedSessionId);
+        if (!purchase.shipping_address) throw new Error('Shipping address not stored');
+        if (purchase.shipping_city !== 'Brooklyn') throw new Error(`Wrong city: ${purchase.shipping_city}`);
+        if (purchase.shipping_state !== 'NY') throw new Error(`Wrong state: ${purchase.shipping_state}`);
+        if (purchase.shipping_name !== 'Test Buyer') throw new Error(`Wrong name: ${purchase.shipping_name}`);
+        await testChannel.send('> ✅ Shipping address stored: 123 Test St, Brooklyn, NY 11201');
+    }));
+
+    // --- Verify ShippingEasy order ID set (may be null if API not configured, but column should exist) ---
+    results.push(await step('Verify ShippingEasy order tracking column', async () => {
+        const purchase = purchases.getBySessionId.get(shippedSessionId);
+        // In test mode, createOrder returns null (no API creds), but the column should be on the row
+        if (!('shippingeasy_order_id' in purchase)) throw new Error('shippingeasy_order_id column missing');
+        // Manually set an order ID to test the pipeline
+        purchases.setShippingEasyOrderId.run('se_test_001', shippedSessionId);
+        const updated = purchases.getBySessionId.get(shippedSessionId);
+        if (updated.shippingeasy_order_id !== 'se_test_001') throw new Error('Order ID not set');
+        await testChannel.send('> ✅ ShippingEasy order ID stored: se_test_001');
+    }));
+
+    // --- Battle buy-in: no shipping address ---
+    results.push(await step('Battle buy-in has no shipping address', async () => {
+        const session = fakeCheckoutSession({
+            name: 'TEST Battle Pack',
+            price: 1099,
+            source: 'pack-battle',
+        });
+        await handleCheckoutCompleted(session);
+        const purchase = purchases.getBySessionId.get(session.id);
+        if (purchase.shipping_address) throw new Error('Battle buy-in should not have shipping address');
+        if (purchase.shippingeasy_order_id) throw new Error('Battle buy-in should not have SE order ID');
+        await testChannel.send('> ✅ Battle buy-in — no shipping address, no ShippingEasy order');
+    }));
+
+    // --- Simulate ShippingEasy webhook with tracking ---
+    results.push(await step('Simulate ShippingEasy webhook', async () => {
+        const fakeReq = {
+            method: 'POST',
+            originalUrl: '/webhooks/shippingeasy',
+            headers: {},
+            query: {},
+            body: {
+                event: {
+                    event_type: 'label.purchased',
+                    data: {
+                        shipment: {
+                            tracking_number: 'TEST9400111899223847263910',
+                            tracking_url: 'https://tools.usps.com/go/TrackConfirmAction?tLabels=TEST9400111899223847263910',
+                            carrier: 'USPS',
+                            carrier_service: 'Priority Mail',
+                            order_number: shippedSessionId,
+                        },
+                    },
+                },
+            },
+        };
+        const fakeRes = { status: () => ({ send: () => {} }) };
+        await handleShippingEasyWebhook(fakeReq, fakeRes);
+
+        // Verify tracking stored
+        const track = tracking.getRecentByEmail.get(TEST_EMAIL);
+        if (!track) throw new Error('Tracking not stored');
+        if (track.tracking_number !== 'TEST9400111899223847263910') throw new Error(`Wrong tracking: ${track.tracking_number}`);
+        await testChannel.send('> ✅ ShippingEasy webhook processed — tracking stored: TEST9400111899223847263910 (USPS)');
+    }));
+
+    // --- !shipments (pending — should be empty since tracking exists) ---
+    results.push(await step('!shipments (pending list)', async () => {
+        const msg = buildTestMessage('!shipments', testChannel);
+        await handleShipments(msg, []);
+        await testChannel.send('> ✅ !shipments — pending list rendered');
+    }));
+
+    // --- !shipments ready ---
+    results.push(await step('!shipments ready', async () => {
+        const msg = buildTestMessage('!shipments ready', testChannel);
+        await handleShipments(msg, ['ready']);
+        await testChannel.send('> ✅ !shipments ready — ready list rendered');
+    }));
+
+    // --- !ship-status @rhapttv ---
+    results.push(await step('!ship-status @rhapttv', async () => {
+        const msg = buildTestMessage('!ship-status @rhapttv', testChannel, rhapttv);
+        await handleShipments(msg, ['status']);
+        await testChannel.send('> ✅ !ship-status — buyer status rendered');
+    }));
+
+    // --- !dropped-off picks up webhook tracking ---
+    results.push(await step('!dropped-off includes webhook tracking', async () => {
+        const msg = buildTestMessage('!dropped-off', testChannel);
+        await handleDroppedOff(msg, []);
+        await testChannel.send('> ✅ !dropped-off — shipped with tracking from ShippingEasy webhook');
+    }));
+
+    return results;
+}
+
+// =========================================================================
 // Results embed
 // =========================================================================
 
@@ -1061,6 +1199,10 @@ async function handleTest(message, args) {
             const results = await runRaceConditionFlow(testChannel);
             await postResultsEmbed(testChannel, results, 'Race Condition Verification');
         }
+        if (sub === 'shipping' || !sub) {
+            const results = await runShippingFlow(testChannel);
+            await postResultsEmbed(testChannel, results, 'Shipping Integration');
+        }
 
         // Direct reset — bypass handleReset's confirmation flow
         clearChannelOverrides();
@@ -1125,6 +1267,11 @@ async function runTestSuite(flow) {
         if (!flow || flow === 'race') {
             const results = await runRaceConditionFlow(testChannel);
             await postResultsEmbed(testChannel, results, 'Race Condition Verification');
+            allResults.push(...results);
+        }
+        if (!flow || flow === 'shipping') {
+            const results = await runShippingFlow(testChannel);
+            await postResultsEmbed(testChannel, results, 'Shipping Integration');
             allResults.push(...results);
         }
 

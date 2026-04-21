@@ -20,6 +20,7 @@ import { clearExpiryTimer, clearListingTtl, updateListingEmbed, updateListSessio
 import { addRevenue } from '../community-goals.js';
 import { recordShipping } from '../shipping.js';
 import { recordPullPurchase } from '../commands/pull.js';
+import { createOrder } from '../shippingeasy-api.js';
 
 const stripe = new Stripe(config.STRIPE_SECRET_KEY);
 
@@ -208,6 +209,37 @@ async function handleCheckoutCompleted(session) {
     if (shippingCountry && shippingCountry !== 'US' && discordUserId) {
         discordLinks.setCountry.run(shippingCountry, discordUserId);
         console.log(`Auto-flagged international: ${discordUserId} → ${shippingCountry}`);
+    }
+
+    // Store full shipping address and create ShippingEasy order
+    const shippingDetails = session.shipping_details;
+    if (shippingDetails?.address) {
+        const addr = shippingDetails.address;
+        const name = session.customer_details?.name || shippingDetails.name || '';
+        purchases.updateShippingAddress.run(
+            name,
+            addr.line1 + (addr.line2 ? `, ${addr.line2}` : ''),
+            addr.city || '',
+            addr.state || '',
+            addr.postal_code || '',
+            addr.country || '',
+            session.id,
+        );
+
+        // Create ShippingEasy order (skip battle buy-ins and ad-hoc shipping)
+        const source = session.metadata?.source || '';
+        if (source !== 'pack-battle' && source !== 'ad-hoc-shipping') {
+            const orderId = await createOrder({
+                stripeSessionId: session.id,
+                customerName: name,
+                email: customerEmail,
+                address: addr,
+                lineItems: lineItems || [],
+            });
+            if (orderId) {
+                purchases.setShippingEasyOrderId.run(orderId, session.id);
+            }
+        }
     }
 
     // Detect shipping mismatch — international address but domestic rate selected

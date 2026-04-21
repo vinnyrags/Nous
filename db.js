@@ -288,6 +288,15 @@ try { db.exec(`ALTER TABLE giveaways ADD COLUMN is_social INTEGER DEFAULT 0`); }
 try { db.exec(`ALTER TABLE giveaways ADD COLUMN social_link TEXT`); } catch { /* exists */ }
 try { db.exec(`ALTER TABLE giveaway_entries ADD COLUMN tiktok_username TEXT`); } catch { /* exists */ }
 
+// Store full shipping address and ShippingEasy order link on purchases (v11)
+try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_name TEXT DEFAULT NULL`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_address TEXT DEFAULT NULL`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_city TEXT DEFAULT NULL`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_state TEXT DEFAULT NULL`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_postal_code TEXT DEFAULT NULL`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_country TEXT DEFAULT NULL`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE purchases ADD COLUMN shippingeasy_order_id TEXT DEFAULT NULL`); } catch { /* exists */ }
+
 // =========================================================================
 // Purchases
 // =========================================================================
@@ -342,6 +351,40 @@ const stmts = {
 
     getBySessionId: db.prepare(`
         SELECT * FROM purchases WHERE stripe_session_id = ?
+    `),
+
+    updateShippingAddress: db.prepare(`
+        UPDATE purchases
+        SET shipping_name = ?, shipping_address = ?, shipping_city = ?, shipping_state = ?, shipping_postal_code = ?, shipping_country = ?
+        WHERE stripe_session_id = ?
+    `),
+
+    setShippingEasyOrderId: db.prepare(`
+        UPDATE purchases SET shippingeasy_order_id = ? WHERE stripe_session_id = ?
+    `),
+
+    getPendingShipments: db.prepare(`
+        SELECT p.* FROM purchases p
+        WHERE p.shippingeasy_order_id IS NOT NULL
+          AND p.shipped_at IS NULL
+          AND p.shipping_address IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM tracking t WHERE t.customer_email = p.customer_email AND t.created_at >= p.created_at)
+    `),
+
+    getReadyShipments: db.prepare(`
+        SELECT p.*, t.tracking_number, t.carrier, t.tracking_url
+        FROM purchases p
+        JOIN tracking t ON t.customer_email = p.customer_email AND t.created_at >= p.created_at
+        WHERE p.shippingeasy_order_id IS NOT NULL
+          AND p.shipped_at IS NULL
+    `),
+
+    getShipmentsByDiscordId: db.prepare(`
+        SELECT p.*, t.tracking_number, t.carrier, t.tracking_url
+        FROM purchases p
+        LEFT JOIN tracking t ON t.customer_email = p.customer_email AND t.created_at >= p.created_at
+        WHERE p.discord_user_id = ? AND p.shipping_address IS NOT NULL
+        ORDER BY p.created_at DESC LIMIT 10
     `),
 };
 
