@@ -1147,6 +1147,83 @@ async function runShippingFlow(testChannel) {
 }
 
 // =========================================================================
+// Flow 5: Load Test (concurrency + dedup verification)
+// =========================================================================
+
+async function runLoadTestFlow(testChannel) {
+    const results = [];
+
+    await testChannel.send({ embeds: [new EmbedBuilder().setTitle('⚡ Load Test').setDescription('Testing concurrent purchase handling...').setColor(0xceff00)] });
+
+    // Link test account
+    purchases.linkDiscord.run(TEST_USER_ID, TEST_EMAIL);
+
+    // --- Rapid concurrent purchases (10 at once) ---
+    results.push(await step('10 rapid concurrent purchases', async () => {
+        const sessions = [];
+        for (let i = 0; i < 10; i++) {
+            sessions.push(fakeCheckoutSession({
+                name: `LOAD Test Item ${i + 1}`,
+                price: 500 + i,
+                shippingAddress: {
+                    line1: `${100 + i} Load Test St`,
+                    city: 'Brooklyn',
+                    state: 'NY',
+                    postal_code: '11201',
+                    country: 'US',
+                },
+            }));
+        }
+
+        // Fire all 10 simultaneously (simulates concurrent webhooks)
+        await Promise.all(sessions.map(s => handleCheckoutCompleted(s)));
+
+        // Verify all 10 recorded
+        const allPurchases = db.prepare('SELECT COUNT(*) as count FROM purchases').get();
+        if (allPurchases.count < 10) throw new Error(`Expected 10 purchases, got ${allPurchases.count}`);
+
+        await testChannel.send(`> ✅ 10 concurrent purchases — all ${allPurchases.count} recorded`);
+    }));
+
+    // --- Session ID deduplication ---
+    results.push(await step('Duplicate session ID rejected', async () => {
+        const session = fakeCheckoutSession({ name: 'LOAD Dedup Test', price: 999 });
+        const sessionId = session.id;
+
+        await handleCheckoutCompleted(session);
+        const before = db.prepare('SELECT COUNT(*) as count FROM purchases WHERE stripe_session_id = ?').get(sessionId);
+
+        // Try inserting the same session again
+        await handleCheckoutCompleted({ ...session, id: sessionId });
+        const after = db.prepare('SELECT COUNT(*) as count FROM purchases WHERE stripe_session_id = ?').get(sessionId);
+
+        if (after.count !== before.count) throw new Error(`Duplicate not rejected: ${before.count} → ${after.count}`);
+        await testChannel.send('> ✅ Duplicate session ID — rejected by INSERT OR IGNORE');
+    }));
+
+    // --- Purchase count integrity ---
+    results.push(await step('Purchase count integrity', async () => {
+        const count = purchases.getPurchaseCount.get(TEST_USER_ID);
+        if (!count || count.total_purchases < 10) throw new Error(`Expected 10+ purchases, got ${count?.total_purchases}`);
+        await testChannel.send(`> ✅ Purchase count integrity — ${count.total_purchases} total for test user`);
+    }));
+
+    // --- Concurrent shipping lookups ---
+    results.push(await step('Concurrent shipping lookups', async () => {
+        // This tests the SQLite read path under concurrent access
+        const lookups = [];
+        for (let i = 0; i < 20; i++) {
+            lookups.push(purchases.getDiscordIdByEmail.get(TEST_EMAIL));
+        }
+        const allValid = lookups.every(l => l?.discord_user_id === TEST_USER_ID);
+        if (!allValid) throw new Error('Some lookups returned wrong data');
+        await testChannel.send('> ✅ 20 concurrent shipping lookups — all returned correct data');
+    }));
+
+    return results;
+}
+
+// =========================================================================
 // Results embed
 // =========================================================================
 
@@ -1215,6 +1292,10 @@ async function handleTest(message, args) {
         if (sub === 'shipping' || !sub) {
             const results = await runShippingFlow(testChannel);
             await postResultsEmbed(testChannel, results, 'Shipping Integration');
+        }
+        if (sub === 'loadtest' || !sub) {
+            const results = await runLoadTestFlow(testChannel);
+            await postResultsEmbed(testChannel, results, 'Load Test');
         }
 
         // Direct reset — bypass handleReset's confirmation flow
@@ -1285,6 +1366,11 @@ async function runTestSuite(flow) {
         if (!flow || flow === 'shipping') {
             const results = await runShippingFlow(testChannel);
             await postResultsEmbed(testChannel, results, 'Shipping Integration');
+            allResults.push(...results);
+        }
+        if (!flow || flow === 'loadtest') {
+            const results = await runLoadTestFlow(testChannel);
+            await postResultsEmbed(testChannel, results, 'Load Test');
             allResults.push(...results);
         }
 

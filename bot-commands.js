@@ -286,13 +286,17 @@ const messages = [
     {
         title: '🧪 Test Suite',
         description: [
-            '**`!test`** — Run all three test flows (card night + giveaway/spin + race conditions). All output routes to #test-suite. Ends with data reset.',
+            '**`!test`** — Run all test flows. All output routes to #test-suite. Ends with data reset.',
             '',
             '**`!test card-night`** — Card night critical path (81 steps: hype → live → purchases → sells → lists → pulls → battles → coupons → duck races → analytics → shipping → tracking → dropped-off → audit → waive → refund).',
             '',
             '**`!test giveaway`** — Giveaway & spin flow (16 steps: standard giveaway → social giveaway → cancel → all spin variants).',
             '',
             '**`!test race`** — Race condition verification (8 steps: atomic reservation, duck race double-start, giveaway double-click, battle capacity, shipping dedup, coupon single-active, TTL vs payment, webhook retry).',
+            '',
+            '**`!test shipping`** — ShippingEasy integration (9 steps: address storage → SE order → webhook tracking → shipments commands → dropped-off with tracking).',
+            '',
+            '**`!test loadtest`** — Concurrency verification (4 steps: 10 rapid concurrent purchases → dedup check → purchase count integrity → concurrent read verification).',
             '',
             '*Uses @rhapttv test account. Simulates buyer interactions via direct handler calls. Stripe must be in test mode.*',
         ].join('\n'),
