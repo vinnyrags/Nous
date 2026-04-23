@@ -56,6 +56,7 @@ import { syncBotCommands } from './sync-bot-commands.js';
 import { initCommunityGoals } from './community-goals.js';
 import { initWelcome } from './commands/welcome.js';
 import { initMinecraftChannel, handleMinecraftReaction } from './commands/minecraft.js';
+import { initLfgChannel } from './commands/lfg.js';
 const PREFIX = '!';
 
 // =========================================================================
@@ -246,6 +247,9 @@ client.once('ready', async () => {
 
     // Initialize the persistent #minecraft react-for-DM embed
     await initMinecraftChannel();
+
+    // Initialize the persistent #looking-for-group overview embed
+    await initLfgChannel();
 
     // Initialize giveaways (close expired, schedule active timers)
     initGiveaways();

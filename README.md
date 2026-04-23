@@ -53,7 +53,7 @@ Key variables:
 | `community-goals.js` | Community goal tracking and progress updates |
 | `livestream-flow.js` | Card night flow orchestration — queue open, battles, duck races, stream end |
 | `notify-deploy.js` | Deploy status notifications to `#dev-log` |
-| `commands/` | Message command handlers (`!sell`, `!battle`, `!queue`, etc.) plus auto-managed channel embeds (`welcome.js`, `minecraft.js`) |
+| `commands/` | Message command handlers (`!sell`, `!battle`, `!queue`, etc.) plus auto-managed channel embeds (`welcome.js`, `minecraft.js`, `lfg.js`) |
 | `webhooks/` | Stripe and Twitch webhook handlers |
 | `alerts/` | New-product alerts and channel messaging |
 | `scripts/` | Operational scripts (see below) |
