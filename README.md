@@ -34,7 +34,8 @@ Key variables:
 - `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_WEBHOOK_SECRET`, `TWITCH_BROADCASTER_ID` — stream online/offline events
 - `SHIPPINGEASY_API_KEY`, `SHIPPINGEASY_API_SECRET` — order/shipment sync
 - `DISCORD_MINECRAFT_CHANNEL_ID` — channel ID for the react-for-invite embed
-- `MINECRAFT_JAVA_INVITE`, `MINECRAFT_BEDROCK_HORROR_INVITE`, `MINECRAFT_BEDROCK_CREATIVE_INVITE` — DM payload sent to a user when they react with the matching emoji (free-form text — IP, realm code, multi-line instructions)
+- `MINECRAFT_BEDROCK_HORROR_INVITE`, `MINECRAFT_BEDROCK_CREATIVE_INVITE` — realm invite URL the bot DMs the user when they react with the matching Bedrock emoji
+- `MINECRAFT_JAVA_INVITE` — intro text that appears above the Java whitelist button in the DM. Java Realms don't expose shareable URLs, so reacting 🪓 DMs an intro + button → modal → `#ops` whitelist request (pings Akivili). Vincent adds the submitted Minecraft Java username to the Realm allowlist manually.
 - `BOT_PORT` — Express webhook server port (default 3100)
 - `SHOP_URL`, `SITE_URL`, `LIVESTREAM_SECRET` — public URLs and livestream toggle secret
 
