@@ -396,7 +396,13 @@ async function main() {
         // query returns a worse match than a broader one.
         const cleaned = stripParensFromName(name);
         const searchName = cleaned.name || name;
-        const searchNumber = number || cleaned.embeddedNumber || '';
+
+        // Column H sometimes holds a game-series tag like "SM" or "XY" rather
+        // than a real card number. When H has no digits, prefer any number
+        // embedded in the card title ("(205)") — that's usually the real
+        // set-position, which the API indexes by.
+        const hHasDigits = /\d/.test(number);
+        const searchNumber = (hHasDigits ? number : '') || cleaned.embeddedNumber || '';
         const norm = normalizeNumber(searchNumber);
         const variants = nameVariants(searchName);
         const queryAttempts = [];
