@@ -1,19 +1,29 @@
 /**
- * Push Card Singles to Stripe from Google Sheets
+ * Push Card Singles to Stripe from Google Sheets.
  *
- * Reads the Singles tab from Google Sheets and creates/updates Stripe
- * products with card-specific metadata. Writes the Stripe Product ID
- * back to column Q so re-runs are idempotent.
- *
- * Every product created here is tagged with metadata.type = "card" so
+ * Reads the `Singles` tab (post-migration A-T schema — see
+ * scripts/shop/migrate-singles-schema.js) and creates/updates Stripe
+ * products. Every product is tagged with `metadata.type = "card"` so
  * pull-cards.php claims it and pull-products.php skips it.
  *
- * Usage: node scripts/shop/push-cards.js [--clean] [--sheet=Singles]
+ * Writes back the Stripe Product ID to column S on first push so
+ * re-runs are idempotent (no duplicate Stripe products).
  *
- * Columns: A Name | B Price | C Category | D Stock | E Cost | F Sale Price
- *          G Image URL | H Language | I Game | J Set Name | K Set Code
- *          L Set Number | M Rarity | N Variant | O Release Year | P Artist
- *          Q Stripe Product ID (written back) | R Notes
+ * Usage:
+ *   node scripts/shop/push-cards.js [--clean] [--dry-run] [--limit=N]
+ *
+ * Column layout expected:
+ *   A Card Name            K Variant
+ *   B TCGPlayer Direct     L Rarity
+ *   C TCGPlayer Market NM  M Game
+ *   D Price Charting       N Language
+ *   E Price (authoritative → Stripe default_price)
+ *   F Stock                O Image URL
+ *   G Sale Price (opt)     P Release Year
+ *   H Card Number          Q Artist
+ *   I Set Name             R Pokemon TCG API ID
+ *   J Set Code             S Stripe Product ID (writeback)
+ *                          T Notes (internal, not pushed)
  */
 
 const fs = require('fs');
@@ -44,13 +54,31 @@ const stripe = new Stripe(STRIPE_KEY);
 
 const args = process.argv.slice(2);
 const CLEAN = args.includes('--clean');
-const SHEET_OVERRIDE = args.find((a) => a.startsWith('--sheet='));
-const ACTIVE_SHEET = SHEET_OVERRIDE ? SHEET_OVERRIDE.split('=')[1] : SHEET_NAME;
+const DRY_RUN = args.includes('--dry-run');
+const LIMIT_ARG = args.find((a) => a.startsWith('--limit='));
+const LIMIT = LIMIT_ARG ? parseInt(LIMIT_ARG.split('=')[1], 10) : Infinity;
+
+// Column indices for the A-T schema.
+const COL = {
+    A: 0, B: 1, C: 2, D: 3, E: 4,
+    F: 5, G: 6, H: 7, I: 8, J: 9,
+    K: 10, L: 11, M: 12, N: 13, O: 14,
+    P: 15, Q: 16, R: 17, S: 18, T: 19,
+};
 
 /**
- * Deactivate all existing cards (metadata.type === "card") in Stripe.
+ * Parse a display price string like "$25", "$1,000", or "$24.99" into
+ * Stripe's integer-cents format. Returns NaN when the value can't be parsed.
  */
-async function cleanCards() {
+function priceToCents(raw) {
+    if (!raw) return NaN;
+    const cleaned = String(raw).replace(/[^\d.]/g, '');
+    const dollars = parseFloat(cleaned);
+    if (isNaN(dollars) || dollars <= 0) return NaN;
+    return Math.round(dollars * 100);
+}
+
+async function cleanCardProducts() {
     console.log('Cleaning: deactivating all existing Stripe card products...');
     let hasMore = true;
     let startingAfter = null;
@@ -64,7 +92,7 @@ async function cleanCards() {
 
         for (const product of products.data) {
             if ((product.metadata || {}).type === 'card') {
-                await stripe.products.update(product.id, { active: false });
+                if (!DRY_RUN) await stripe.products.update(product.id, { active: false });
                 console.log(`  Deactivated: ${product.name}`);
                 count++;
             }
@@ -79,7 +107,7 @@ async function cleanCards() {
 
 async function main() {
     if (CLEAN) {
-        await cleanCards();
+        await cleanCardProducts();
     }
 
     const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
@@ -91,92 +119,124 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${ACTIVE_SHEET}!A2:R`,
+        range: `${SHEET_NAME}!A2:T`,
     });
 
     const rows = res.data.values || [];
-
     if (!rows.length) {
         console.log('No cards found in the sheet.');
         return;
     }
 
-    console.log(`Found ${rows.length} card(s) in Google Sheets.\n`);
+    console.log(`Found ${rows.length} card(s).${DRY_RUN ? ' [dry-run]' : ''}\n`);
 
-    const writebacks = []; // [{ rowIndex, productId }]
-
+    const writebacks = []; // { rowIndex, productId }
     let created = 0;
     let updated = 0;
     let skipped = 0;
+    let processed = 0;
 
     for (let i = 0; i < rows.length; i++) {
+        if (processed >= LIMIT) break;
         const row = rows[i];
-        const sheetRowNumber = i + 2; // rows start at row 2 in the sheet
+        const sheetRow = i + 2;
 
-        const [
-            name, priceStr, category, stockStr, costStr, salePriceStr,
-            imageUrl, language, game, setName, setCode, cardNumber,
-            rarity, variant, releaseYear, artist, existingProductId, _notes,
-        ] = row;
+        const name = (row[COL.A] || '').trim();
+        const priceStr = (row[COL.E] || '').trim();
+        const stock = (row[COL.F] || '1').trim();
+        const salePriceStr = (row[COL.G] || '').trim();
+        const cardNumber = (row[COL.H] || '').trim();
+        const setName = (row[COL.I] || '').trim();
+        const setCode = (row[COL.J] || '').trim();
+        const variant = (row[COL.K] || '').trim();
+        const rarity = (row[COL.L] || '').trim();
+        const game = (row[COL.M] || 'pokemon').trim();
+        const language = (row[COL.N] || 'English').trim();
+        const imageUrl = (row[COL.O] || '').trim();
+        const releaseYear = (row[COL.P] || '').trim();
+        const artist = (row[COL.Q] || '').trim();
+        const tcgApiId = (row[COL.R] || '').trim();
+        const existingProductId = (row[COL.S] || '').trim();
+        const tcgDirect = (row[COL.B] || '').trim();
+        const tcgMarketNM = (row[COL.C] || '').trim();
+        const priceCharting = (row[COL.D] || '').trim();
 
-        if (!name || !priceStr) {
-            console.log(`  Skipping row ${sheetRowNumber} — missing name or price`);
+        if (!name) {
+            console.log(`  Skipping row ${sheetRow} — missing name`);
             skipped++;
             continue;
         }
 
-        const priceAmount = Math.round(parseFloat(priceStr) * 100);
-        if (isNaN(priceAmount) || priceAmount <= 0) {
-            console.log(`  Skipping ${name} — invalid price: ${priceStr}`);
+        const priceAmount = priceToCents(priceStr);
+        if (isNaN(priceAmount)) {
+            console.log(`  Skipping row ${sheetRow} (${name}) — invalid price: "${priceStr}"`);
             skipped++;
             continue;
         }
 
-        const metadata = { type: 'card' };
-        if (category) metadata.category = category.toLowerCase().trim();
-        if (stockStr) metadata.stock = stockStr.trim();
-        if (costStr) metadata.cost = costStr.trim();
-        if (language) metadata.language = language.trim();
-        if (game) metadata.game = game.trim().toLowerCase();
-        if (setName) metadata.set_name = setName.trim();
-        if (setCode) metadata.set_code = setCode.trim();
-        if (cardNumber) metadata.card_number = cardNumber.trim();
-        if (rarity) metadata.rarity = rarity.trim().toLowerCase().replace(/\s+/g, '-');
-        if (variant) metadata.variant = variant.trim().toLowerCase().replace(/\s+/g, '-');
-        if (releaseYear) metadata.release_year = String(releaseYear).trim();
-        if (artist) metadata.artist = artist.trim();
-        if (imageUrl) metadata.image_url = imageUrl.trim();
-        metadata.card_name = name.trim();
+        // Build Stripe product name — disambiguates same-named cards in
+        // different sets in the Stripe dashboard.
+        const productName = cardNumber
+            ? `${name} #${cardNumber}${setName ? ' — ' + setName : ''}`
+            : setName ? `${name} — ${setName}` : name;
 
-        // Find existing product — prefer the stored ID from column Q, fall back to name search
+        const metadata = {
+            type: 'card',
+            stock,
+            card_name: name,
+        };
+        if (cardNumber) metadata.card_number = cardNumber;
+        if (setName) metadata.set_name = setName;
+        if (setCode) metadata.set_code = setCode;
+        if (variant) metadata.variant = variant;
+        if (rarity) metadata.rarity = rarity;
+        if (game) metadata.game = game;
+        if (language) metadata.language = language;
+        if (releaseYear) metadata.release_year = releaseYear;
+        if (artist) metadata.artist = artist;
+        if (tcgApiId) metadata.tcg_api_id = tcgApiId;
+        // Reference prices — kept on Stripe for operator context, not used at checkout.
+        if (tcgDirect) metadata.ref_tcg_direct = tcgDirect;
+        if (tcgMarketNM) metadata.ref_tcg_market_nm = tcgMarketNM;
+        if (priceCharting) metadata.ref_price_charting = priceCharting;
+
+        // Find existing product — prefer the stored ID, fall back to name+type search
         let existingProduct = null;
-
         if (existingProductId) {
             try {
-                const fetched = await stripe.products.retrieve(existingProductId.trim());
-                if (fetched && !fetched.deleted) {
-                    existingProduct = fetched;
-                }
-            } catch (e) {
-                console.log(`    Warning: Stripe product ${existingProductId} not found, creating new.`);
+                const fetched = await stripe.products.retrieve(existingProductId);
+                if (fetched && !fetched.deleted) existingProduct = fetched;
+            } catch {
+                console.log(`  Warning: stored Stripe ID ${existingProductId} not found, will search.`);
             }
         }
-
         if (!existingProduct) {
             const search = await stripe.products.search({
-                query: `name~"${name.replace(/"/g, '\\"')}" AND metadata['type']:'card'`,
+                query: `name~"${productName.replace(/"/g, '\\"')}" AND metadata['type']:'card'`,
             });
             existingProduct = search.data.find(
-                (p) => p.name.toLowerCase() === name.toLowerCase()
+                (p) => p.name.toLowerCase() === productName.toLowerCase(),
             ) || null;
         }
 
         let product;
         let defaultPriceId;
 
+        if (DRY_RUN) {
+            const preview = [
+                `price=$${(priceAmount / 100).toFixed(2)}`,
+                `stock=${stock}`,
+                rarity ? `rarity=${rarity}` : null,
+                imageUrl ? 'image=✓' : null,
+            ].filter(Boolean).join(' ');
+            console.log(`  [dry] ${existingProduct ? 'update' : 'create'}: ${productName} (${preview})`);
+            processed++;
+            continue;
+        }
+
         if (existingProduct) {
-            const updateData = { metadata, active: true };
-            if (imageUrl) updateData.images = [imageUrl.trim()];
+            const updateData = { metadata, active: true, name: productName };
+            if (imageUrl) updateData.images = [imageUrl];
 
             product = await stripe.products.update(existingProduct.id, updateData);
 
@@ -194,47 +254,44 @@ async function main() {
                         unit_amount: priceAmount,
                         currency: 'usd',
                     });
-                    await stripe.products.update(product.id, {
-                        default_price: newPrice.id,
-                    });
+                    await stripe.products.update(product.id, { default_price: newPrice.id });
                     defaultPriceId = newPrice.id;
                     console.log(`    Price updated: $${(priceAmount / 100).toFixed(2)}`);
                 }
             }
 
-            const info = [setName, cardNumber, rarity, stockStr ? `stock:${stockStr}` : ''].filter(Boolean);
-            console.log(`  Updated: ${name}${info.length ? ` [${info.join(', ')}]` : ''}`);
+            console.log(`  Updated: ${productName}`);
             updated++;
         } else {
             const createData = {
-                name,
+                name: productName,
                 metadata,
                 default_price_data: {
                     unit_amount: priceAmount,
                     currency: 'usd',
                 },
             };
-            if (imageUrl) createData.images = [imageUrl.trim()];
+            if (imageUrl) createData.images = [imageUrl];
 
             product = await stripe.products.create(createData);
             defaultPriceId = typeof product.default_price === 'string'
                 ? product.default_price
                 : product.default_price?.id;
 
-            const info = [setName, cardNumber, rarity, stockStr ? `stock:${stockStr}` : ''].filter(Boolean);
-            console.log(`  Created: ${name} ($${(priceAmount / 100).toFixed(2)})${info.length ? ` [${info.join(', ')}]` : ''}`);
+            console.log(`  Created: ${productName} ($${(priceAmount / 100).toFixed(2)})`);
             created++;
         }
 
-        // Remember to write the product ID back to the sheet if it changed
-        if (product && (!existingProductId || existingProductId.trim() !== product.id)) {
-            writebacks.push({ rowIndex: sheetRowNumber, productId: product.id });
+        processed++;
+
+        // Queue a writeback if the Product ID column was blank or mismatched
+        if (product && (!existingProductId || existingProductId !== product.id)) {
+            writebacks.push({ rowIndex: sheetRow, productId: product.id });
         }
 
-        // Handle sale price
-        const salePriceAmount = salePriceStr ? Math.round(parseFloat(salePriceStr) * 100) : 0;
-
-        if (salePriceAmount > 0) {
+        // Sale price handling (column G)
+        const salePriceAmount = priceToCents(salePriceStr);
+        if (!isNaN(salePriceAmount) && salePriceAmount > 0) {
             const prices = await stripe.prices.list({
                 product: product.id,
                 active: true,
@@ -242,9 +299,8 @@ async function main() {
             });
 
             let salePriceObj = prices.data.find(
-                (p) => p.unit_amount === salePriceAmount && p.id !== defaultPriceId
+                (p) => p.unit_amount === salePriceAmount && p.id !== defaultPriceId,
             );
-
             if (!salePriceObj) {
                 salePriceObj = await stripe.prices.create({
                     product: product.id,
@@ -269,11 +325,10 @@ async function main() {
         }
     }
 
-    // Write Stripe Product IDs back to column Q
-    if (writebacks.length) {
-        console.log(`\nWriting ${writebacks.length} Stripe Product ID(s) back to the sheet...`);
+    if (!DRY_RUN && writebacks.length) {
+        console.log(`\nWriting ${writebacks.length} Stripe Product ID(s) back to column S...`);
         const data = writebacks.map(({ rowIndex, productId }) => ({
-            range: `${ACTIVE_SHEET}!Q${rowIndex}`,
+            range: `${SHEET_NAME}!S${rowIndex}`,
             values: [[productId]],
         }));
         await sheets.spreadsheets.values.batchUpdate({
@@ -288,4 +343,7 @@ async function main() {
     console.log(`\nDone: ${created} created, ${updated} updated, ${skipped} skipped.`);
 }
 
-main().catch(console.error);
+main().catch((e) => {
+    console.error('push-cards failed:', e.message);
+    process.exit(1);
+});
