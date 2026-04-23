@@ -36,8 +36,11 @@ const API_KEY = process.env.POKEMON_TCG_API_KEY || '';
 const MAX_RETRIES = 3;
 
 const DRY_RUN = process.argv.includes('--dry-run');
+const FORCE = process.argv.includes('--force');
 const LIMIT_ARG = process.argv.find((a) => a.startsWith('--limit='));
 const LIMIT = LIMIT_ARG ? parseInt(LIMIT_ARG.split('=')[1], 10) : Infinity;
+const ROW_ARG = process.argv.find((a) => a.startsWith('--row='));
+const ONLY_ROW = ROW_ARG ? parseInt(ROW_ARG.split('=')[1], 10) : null;
 
 // Column indices for the A-T schema.
 const COL = {
@@ -184,7 +187,9 @@ function buildQuery(name, number, setHint) {
 }
 
 async function fetchCards(query) {
-    const url = `${API_BASE}/cards?q=${encodeURIComponent(query)}&pageSize=10`;
+    // pageSize=50 so broad name-only queries return the full pool for a
+    // given card name; the scorer then picks the right set out of it.
+    const url = `${API_BASE}/cards?q=${encodeURIComponent(query)}&pageSize=50`;
     const headers = API_KEY ? { 'X-Api-Key': API_KEY } : {};
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -212,29 +217,121 @@ function cleanSetHint(hint) {
     return hint.replace(/^[A-Z]+\d*:\s*/, '').trim();
 }
 
-function pickBestMatch(candidates, name, setHint) {
-    if (!candidates.length) return null;
+const STOPWORDS = new Set([
+    'the', 'and', 'or', 'of', 'a', 'an',
+    'set', 'sets', 'promos', 'promo', 'exclusive', 'exclusives',
+    'collection', 'cards', 'card',
+]);
 
-    // Exact (case-insensitive) name match preferred
-    const exact = candidates.filter(
-        (c) => c.name.toLowerCase() === name.toLowerCase(),
+function tokenize(s) {
+    return (s || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length > 1 && !STOPWORDS.has(w));
+}
+
+/**
+ * Score a candidate card against what we know. Higher is better.
+ *
+ * Dimensions:
+ *   - exact name match (case-insensitive)        +100
+ *   - name is substring match                     +40
+ *   - exact card number match                     +80
+ *   - number match ignoring leading letters       +40
+ *   - user set hint tokens ⊆ API set name tokens  +15 per token
+ *   - user set hint tokens ⊇ API set name tokens  +10 per token
+ *   - user set code appears in API set ID         +25
+ *   - Number-only name collision penalty          -50
+ *     (if we expected a card with "EX/GX/V" and
+ *     matched a base form without it)
+ */
+function normalizeName(s) {
+    // Treat hyphens and spaces as equivalent so "Venusaur-EX" and
+    // "Venusaur EX" compare as identical. Case-insensitive.
+    return (s || '')
+        .toLowerCase()
+        .replace(/[-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function scoreCandidate(candidate, { name, number, setHint, setCode }) {
+    let score = 0;
+
+    const apiName = normalizeName(candidate.name);
+    const userName = normalizeName(name);
+    if (apiName === userName) score += 100;
+    else if (apiName.includes(userName)) score += 40;
+    else if (userName.includes(apiName)) score += 20;
+
+    // Penalty if user expects a form suffix (EX/GX/V/VMAX/VSTAR) and API result lacks it
+    const FORMS = ['ex', 'gx', 'v', 'vmax', 'vstar', 'break', 'lv.x'];
+    const userForm = FORMS.find((f) =>
+        new RegExp('(^|[\\s-])' + f.replace(/\./g, '\\.') + '$', 'i').test(userName.trim()),
     );
-    const pool = exact.length ? exact : candidates;
+    const apiForm = FORMS.find((f) =>
+        new RegExp('(^|[\\s-])' + f.replace(/\./g, '\\.') + '$', 'i').test(apiName.trim()),
+    );
+    if (userForm && userForm !== apiForm) score -= 50;
 
-    // If we have a set hint, prefer matches whose set name contains it
-    if (setHint) {
-        const setMatches = pool.filter((c) =>
-            (c.set?.name || '').toLowerCase().includes(setHint.toLowerCase()),
-        );
-        if (setMatches.length) return setMatches[0];
+    const apiNum = (candidate.number || '').toLowerCase();
+    const userNum = (number || '').toLowerCase();
+    if (userNum) {
+        if (apiNum === userNum) score += 80;
+        else {
+            const userStripped = userNum.replace(/^[a-z]+/, '');
+            const apiStripped = apiNum.replace(/^[a-z]+/, '');
+            if (userStripped && apiStripped && userStripped === apiStripped) score += 40;
+            else if (userNum.includes('/') && userNum.split('/')[0] === apiNum) score += 40;
+        }
     }
 
-    // Otherwise the most-recent release wins
-    return pool.slice().sort((a, b) => {
-        const da = a.set?.releaseDate || '';
-        const db = b.set?.releaseDate || '';
-        return db.localeCompare(da);
-    })[0];
+    const apiSetName = (candidate.set?.name || '').toLowerCase();
+    const apiSetId = (candidate.set?.id || '').toLowerCase();
+    const userHintTokens = tokenize(setHint);
+    const apiSetTokens = tokenize(apiSetName);
+
+    // Set-matching is the critical differentiator when users have ambiguous
+    // cards like "Yveltal" with no card number — weight it heavily enough
+    // to outpace the older-first tiebreaker even with zero user signals.
+    // Exact token match: +50 per overlap, bidirectional.
+    const tokensInCommon = userHintTokens.filter((t) => apiSetTokens.includes(t));
+    score += tokensInCommon.length * 50;
+
+    // Full set-name substring match (API "Generations" ⊂ user "Generations:
+    // Radiant Collection" or vice versa) — extra boost.
+    if (apiSetName && setHint) {
+        const hintLower = setHint.toLowerCase();
+        if (apiSetName.length >= 3) {
+            if (hintLower.includes(apiSetName)) score += 60;
+            else if (apiSetName.includes(hintLower)) score += 60;
+        }
+    }
+
+    if (setCode) {
+        const userCodeLower = setCode.toLowerCase().trim();
+        if (apiSetId === userCodeLower) score += 50;
+        else if (apiSetId.startsWith(userCodeLower) || userCodeLower.startsWith(apiSetId)) score += 25;
+    }
+
+    return score;
+}
+
+function pickBestMatch(candidates, context) {
+    if (!candidates.length) return null;
+
+    const scored = candidates.map((c) => ({ card: c, score: scoreCandidate(c, context) }));
+    scored.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        // Tiebreaker: older releases first when no other signal
+        // (helps keep "Generations" cards matched to the Generations set)
+        const da = a.card.set?.releaseDate || '';
+        const db = b.card.set?.releaseDate || '';
+        return da.localeCompare(db);
+    });
+
+    return scored[0]?.card || null;
 }
 
 async function main() {
@@ -272,25 +369,31 @@ async function main() {
         const row = rows[i];
         const sheetRow = i + 2;
 
+        if (ONLY_ROW && sheetRow !== ONLY_ROW) continue;
+
         const name = (row[COL.A] || '').trim();
         const number = (row[COL.H] || '').trim();
         const rawSetHint = (row[COL.I] || '').trim();
         const setHint = cleanSetHint(rawSetHint);
+        const setCode = (row[COL.J] || '').trim();
 
         if (!name) continue;
 
-        // Skip fully-enriched rows
+        // Skip fully-enriched rows unless --force
         const rarity = (row[COL.L] || '').trim();
         const image = (row[COL.O] || '').trim();
         const year = (row[COL.P] || '').trim();
         const artist = (row[COL.Q] || '').trim();
         const apiId = (row[COL.R] || '').trim();
-        if (rarity && image && year && artist && apiId) {
+        if (!FORCE && rarity && image && year && artist && apiId) {
             logs.alreadyComplete++;
             continue;
         }
 
-        // Build a cascading list of queries from most-specific to most-permissive
+        // Build a cascading list of queries and collect candidates from ALL
+        // productive attempts (not just the first non-empty). The scorer then
+        // picks the best across the full pool — important when a narrow
+        // query returns a worse match than a broader one.
         const cleaned = stripParensFromName(name);
         const searchName = cleaned.name || name;
         const searchNumber = number || cleaned.embeddedNumber || '';
@@ -320,19 +423,33 @@ async function main() {
             queryAttempts.push(buildQuery(v, null, null));
         }
 
-        let candidates = [];
+        // De-duplicate queries before fetching
+        const seenQueries = new Set();
+        const allCandidates = new Map(); // id → card
+
         for (const q of queryAttempts) {
+            if (seenQueries.has(q)) continue;
+            seenQueries.add(q);
             try {
-                candidates = await fetchCards(q);
+                const found = await fetchCards(q);
+                for (const c of found) {
+                    if (c?.id && !allCandidates.has(c.id)) {
+                        allCandidates.set(c.id, c);
+                    }
+                }
             } catch (e) {
                 logs.apiError.push({ row: sheetRow, name, error: e.message });
-                candidates = [];
             }
             await sleep(THROTTLE_MS);
-            if (candidates.length) break;
+
+            // Early exit is disabled — the broader pool the scorer sees,
+            // the better its set-matching can disambiguate. 50 results per
+            // query × max a few queries is still cheap vs. being wrong.
         }
 
-        const match = pickBestMatch(candidates, name, setHint);
+        const candidates = Array.from(allCandidates.values());
+        const ctx = { name: searchName, number: searchNumber, setHint, setCode };
+        const match = pickBestMatch(candidates, ctx);
         if (!match) {
             logs.noMatch.push({ row: sheetRow, name, number, setHint });
             continue;
@@ -347,14 +464,17 @@ async function main() {
         const apiArtist = match.artist || '';
         const apiCardId = match.id || '';
 
+        // In FORCE mode we always overwrite the enriched fields (L/O/P/Q/R)
+        // so the new matcher's picks replace the old ones. Set Name (I) and
+        // Set Code (J) remain user-owned — only filled when blank.
         const writes = {};
         if (!setHint && apiSetName) writes.I = apiSetName;
         if (!(row[COL.J] || '').trim() && apiSetId) writes.J = apiSetId;
-        if (!rarity && apiRarity) writes.L = apiRarity;
-        if (!image && apiImage) writes.O = apiImage;
-        if (!year && apiYear) writes.P = apiYear;
-        if (!artist && apiArtist) writes.Q = apiArtist;
-        if (!apiId && apiCardId) writes.R = apiCardId;
+        if ((FORCE || !rarity) && apiRarity) writes.L = apiRarity;
+        if ((FORCE || !image) && apiImage) writes.O = apiImage;
+        if ((FORCE || !year) && apiYear) writes.P = apiYear;
+        if ((FORCE || !artist) && apiArtist) writes.Q = apiArtist;
+        if ((FORCE || !apiId) && apiCardId) writes.R = apiCardId;
 
         for (const [col, value] of Object.entries(writes)) {
             updates.push({
@@ -371,7 +491,9 @@ async function main() {
             writes.P ? `year=${writes.P}` : null,
             writes.Q ? `artist="${writes.Q}"` : null,
         ].filter(Boolean).join(' ');
-        console.log(`  Row ${sheetRow}: ${name}${number ? ' #' + number : ''} → ${summary}`);
+        const apiIdDisplay = apiCardId || '—';
+        const apiSetDisplay = apiSetName || '—';
+        console.log(`  Row ${sheetRow}: ${name}${number ? ' #' + number : ''} → [${apiIdDisplay}] ${apiSetDisplay}  |  ${summary}`);
     }
 
     console.log(`\n=== Summary ===`);
