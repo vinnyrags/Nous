@@ -1,6 +1,6 @@
 # Nous
 
-Discord bot for the itzenzoTTV trading card business. Powers order notifications, pack battles, card shop listings, queue management, livestream flow, Stripe payment integration, the `#minecraft` react-for-invite hub, and community engagement mechanics.
+Discord bot for the itzenzoTTV trading card business. Powers order notifications, pack battles, card shop listings, queue management, livestream flow, Stripe payment integration, the `#minecraft` react-for-invite hub, the `/cards/` catalog Request-to-See queue, and community engagement mechanics.
 
 Named after the Aeon of Erudition from Honkai: Star Rail.
 
@@ -53,8 +53,8 @@ Key variables:
 | `community-goals.js` | Community goal tracking and progress updates |
 | `livestream-flow.js` | Card night flow orchestration — queue open, battles, duck races, stream end |
 | `notify-deploy.js` | Deploy status notifications to `#dev-log` |
-| `commands/` | Message command handlers (`!sell`, `!battle`, `!queue`, etc.) plus auto-managed channel embeds (`welcome.js`, `minecraft.js`, `lfg.js`) |
-| `webhooks/` | Stripe and Twitch webhook handlers |
+| `commands/` | Message command handlers (`!sell`, `!battle`, `!queue`, `!requests`/`!request`, etc.) plus auto-managed channel embeds (`welcome.js`, `minecraft.js`, `lfg.js`) |
+| `webhooks/` | Stripe, Twitch, ShippingEasy, and card-request webhook handlers |
 | `alerts/` | New-product alerts and channel messaging |
 | `scripts/` | Operational scripts (see below) |
 | `tests/` | Vitest test suite |
@@ -65,6 +65,9 @@ Key variables:
 |--------|---------|
 | `scripts/shop/push-products.js` | Sync Google Sheets product data → Stripe |
 | `scripts/pull-products.php` | Sync Stripe products → WordPress (runs via `wp eval-file` on the server) |
+| `scripts/shop/push-cards.js` | Sync Google Sheets `Singles` tab → Stripe (card catalog) |
+| `scripts/shop/enrich-singles.js` | Backfill Set/Rarity/Image/Artist via the Pokemon TCG API |
+| `scripts/shop/backup-singles.js` | Duplicate the `Singles` tab before a risky enrichment/sync run |
 | `scripts/shop/setup-sheet.js` | Bootstrap the Google Sheets structure |
 | `scripts/shop/discord-audit.js` | Audit Discord roles/permissions |
 | `scripts/shop/discord-security.js` | Security lockdown helpers |

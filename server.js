@@ -16,6 +16,7 @@ import { battles, cardListings, purchases, discordLinks } from './db.js';
 import { handleCheckoutCritical, handleCheckoutNotifications, handleCheckoutCompleted } from './webhooks/stripe.js';
 import { handleTwitchWebhook } from './webhooks/twitch.js';
 import { handleShippingEasyWebhook } from './webhooks/shippingeasy.js';
+import { handleCardRequestCritical, handleCardRequestNotifications } from './webhooks/card-request.js';
 import { createLimiter } from './webhook-limiter.js';
 
 const webhookLimit = createLimiter(10);
@@ -106,6 +107,31 @@ app.post('/webhooks/twitch', express.json({
 // =========================================================================
 
 app.post('/webhooks/shippingeasy', express.json(), handleShippingEasyWebhook);
+
+// =========================================================================
+// Card view request — WordPress pings us when a shopper queues a card
+// =========================================================================
+
+app.post('/webhooks/card-request-notify', express.json(), async (req, res) => {
+    const providedSecret = req.get('X-Bot-Secret') || '';
+    if (config.LIVESTREAM_SECRET && providedSecret !== config.LIVESTREAM_SECRET) {
+        return res.sendStatus(403);
+    }
+
+    try {
+        const context = await webhookLimit(() => handleCardRequestCritical(req.body));
+        res.sendStatus(200);
+
+        if (context) {
+            handleCardRequestNotifications(req.body, context).catch((e) =>
+                console.error('Card request notification error:', e.message),
+            );
+        }
+    } catch (e) {
+        console.error('Card request webhook error:', e.message);
+        res.sendStatus(200);
+    }
+});
 
 // =========================================================================
 // Pack battle direct checkout — creates a Stripe session and redirects

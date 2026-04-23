@@ -57,6 +57,7 @@ import { initCommunityGoals } from './community-goals.js';
 import { initWelcome } from './commands/welcome.js';
 import { initMinecraftChannel, handleMinecraftReaction } from './commands/minecraft.js';
 import { initLfgChannel } from './commands/lfg.js';
+import { handleRequests, handleRequest } from './commands/card-requests.js';
 const PREFIX = '!';
 
 // =========================================================================
@@ -165,6 +166,12 @@ client.on('messageCreate', async (message) => {
                 break;
             case 'test':
                 await handleTest(message, args);
+                break;
+            case 'requests':
+                await handleRequests(message, args);
+                break;
+            case 'request':
+                await handleRequest(message, args);
                 break;
             default:
                 // Unknown command — silently ignore

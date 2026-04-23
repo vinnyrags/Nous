@@ -98,6 +98,25 @@ const messages = [
         color: 0xceff00,
     },
 
+    // Message 5b: Card Catalog Requests
+    {
+        title: '🗃️ Card Catalog Requests',
+        description: [
+            'Shoppers can hit **Request to See on Stream** on any card at itzenzo.tv/cards. Their request lands in `#ops` as a new embed and lives in the WordPress `wp_card_view_requests` table.',
+            '',
+            '**`!requests`** — List up to 10 **pending** card requests (oldest first).',
+            '**`!requests all`** — Include shown/skipped history alongside pending.',
+            '',
+            '**`!request next`** — Show the single oldest pending request, with inline `!request shown <id>` / `!request skip <id>` hints.',
+            '',
+            '**`!request shown <id>`** — Mark a request shown (use after you feature the card live).',
+            '**`!request skip <id>`** — Skip a request (e.g. card sold out, bad match).',
+            '',
+            '*Request rows are for cards in the catalog at itzenzo.tv/cards. Ad-hoc graded/vintage sales still go through `!sell` / `!list` above.*',
+        ].join('\n'),
+        color: 0xceff00,
+    },
+
     // Message 6: Giveaways
     {
         title: '🎁 Giveaways',
