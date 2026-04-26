@@ -91,7 +91,7 @@ const messages = [
             '',
             '**After your order ships** — We can still refund, we just can\'t recall the package. If your package is lost, damaged, or never shows up, DM us with your tracking number and we\'ll work it out together.',
             '',
-            '**Card looks off?** — Small ding, off-center cut, anything that doesn\'t match Near Mint? DM us. We usually issue a partial refund as store credit and you keep the card. Faster than a return, and most buyers prefer it.',
+            '**Concerned about a card?** — Hit **Request to See** on the listing before you buy. We\'ll feature the card on the next card night so you can see edges, surface, and centering on stream before committing.',
             '',
             '**Pack battle buy-ins** — Refundable up until the battle starts on stream. Once packs are being opened, the result is locked in.',
             '',
