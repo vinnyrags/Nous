@@ -1,9 +1,10 @@
 /**
  * Sync reference channels with canonical embed content.
  *
- * On startup, syncs #bot-commands and #livestream-flow. Compares existing
- * bot embeds to the defined content, edits changed messages, posts missing
- * ones, and deletes extras. Only touches messages authored by the bot.
+ * On startup, syncs #bot-commands, #livestream-flow, and #how-it-works.
+ * Compares existing bot embeds to the defined content, edits changed
+ * messages, posts missing ones, and deletes extras. Only touches messages
+ * authored by the bot.
  */
 
 import { EmbedBuilder } from 'discord.js';
@@ -11,6 +12,7 @@ import { client, getChannel } from './discord.js';
 import config from './config.js';
 import commandMessages from './bot-commands.js';
 import flowMessages from './livestream-flow.js';
+import howItWorksMessages from './how-it-works.js';
 
 /**
  * Build a Discord EmbedBuilder from a plain object.
@@ -88,6 +90,7 @@ async function syncChannel(channelKey, desiredMessages, label) {
 async function syncBotCommands() {
     await syncChannel('BOT_COMMANDS', commandMessages, 'Bot commands');
     await syncChannel('LIVESTREAM_FLOW', flowMessages, 'Livestream flow');
+    await syncChannel('HOW_IT_WORKS', howItWorksMessages, 'How it works');
 }
 
 export { syncBotCommands };
