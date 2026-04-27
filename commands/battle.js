@@ -18,6 +18,7 @@ import config from '../config.js';
 import { db, battles, purchases } from '../db.js';
 import { client, getChannel, sendToChannel, sendEmbed, getMember, addRole, getGuild } from '../discord.js';
 import { hasShippingCoveredByDiscordId, getShippingRate, formatShippingRate } from '../shipping.js';
+import * as currentPackBattle from '../lib/wp-current-battle.js';
 
 /**
  * Update the original battle message in #pack-battles.
@@ -107,9 +108,11 @@ async function handleBattle(message, args) {
             return ownerJoinBattle(message);
         case 'status':
             return battleStatus(message);
+        case 'test-homepage':
+            return testHomepageWidget(message);
         default:
             return message.reply(
-                'Usage: `!battle start/close/cancel/join/status`, `!battle winner @user`'
+                'Usage: `!battle start/close/cancel/join/status/test-homepage`, `!battle winner @user`'
             );
     }
 }
@@ -194,6 +197,8 @@ async function startBattle(message, args) {
     const msg = await battleChannel.send({ embeds: [embed], components: [row] });
     battles.setBattleMessage.run(msg.id, battleId);
 
+    currentPackBattle.setOpen({ id: battleId, stripe_price_id: priceId, max_entries: max });
+
     if (message.channel.id !== config.CHANNELS.PACK_BATTLES) {
         await message.channel.send(`⚔️ Pack battle started in <#${config.CHANNELS.PACK_BATTLES}> — **${productName}** (${max} max entries)`);
     }
@@ -220,6 +225,7 @@ async function closeBattle(message) {
         battles.deleteBattle.run(battle.id);
         // Update original message if it exists
         await updateBattleMessage(battle, [], [], 'cancelled');
+        currentPackBattle.clear();
         await message.channel.send(`❌ Pack battle **${battle.product_name}** closed with no entries — not counted.`);
         return;
     }
@@ -233,6 +239,7 @@ async function closeBattle(message) {
 
     // Update the original message in #pack-battles (remove button, show closed state)
     await updateBattleMessage(numberedBattle, entries, paidEntries, 'closed');
+    currentPackBattle.setInProgress(numberedBattle, paidEntries.length);
 
     await message.channel.send(`⚔️ Pack battle #${next} **${battle.product_name}** is closed — ${paidEntries.length} entries. Opening packs now!`);
 }
@@ -248,11 +255,13 @@ async function cancelBattle(message) {
     if (entries.length === 0) {
         await updateBattleMessage(battle, [], [], 'cancelled');
         battles.deleteBattle.run(battle.id);
+        currentPackBattle.clear();
         await message.channel.send(`❌ Pack battle **${battle.product_name}** cancelled — not counted.`);
     } else {
         battles.cancelBattle.run(battle.id);
         const paidEntries = battles.getPaidEntries.all(battle.id);
         await updateBattleMessage(battle, entries, paidEntries, 'cancelled');
+        currentPackBattle.clear();
         await message.channel.send(`❌ Pack battle **${battle.product_name}** has been cancelled.`);
         const entrants = entries.map((e) => `<@${e.discord_user_id}>`).join(', ');
         await message.channel.send(`Notifying entrants: ${entrants} — battle cancelled, refunds if applicable.`);
@@ -292,6 +301,7 @@ async function declareBattleWinner(message, args) {
 
     // Update the original message in #pack-battles with winner
     await updateBattleMessage({ ...battle, winner_id: mentioned.id }, entries, paidEntries, 'complete');
+    currentPackBattle.clear();
 
     const num = battle.battle_number || '?';
 
@@ -399,6 +409,36 @@ async function ownerJoinBattle(message) {
     if (message.channel.id !== config.CHANNELS.PACK_BATTLES) {
         await message.channel.send(`⚔️ Joined battle — ${paidEntries.length}/${battle.max_entries} entries (stock decremented)`);
     }
+}
+
+/**
+ * Cycle the homepage pack-battle widget through its three states without
+ * touching the SQLite battles table or posting in #pack-battles. Useful for
+ * verifying the WP endpoint, ACF write path, and itzenzo.tv render after a
+ * deploy or schema change.
+ */
+async function testHomepageWidget(message) {
+    const stub = {
+        id: 999999,
+        stripe_price_id: 'price_test_homepage',
+        max_entries: 8,
+    };
+
+    await message.channel.send('🧪 Pushing homepage widget: **open** (8 max, 0 paid)…');
+    const openRes = await currentPackBattle.setOpen(stub);
+    await message.channel.send(openRes ? '✅ open OK' : '❌ open failed (see bot logs)');
+
+    await new Promise((r) => setTimeout(r, 4000));
+
+    await message.channel.send('🧪 Pushing homepage widget: **in_progress** (3 paid)…');
+    const progRes = await currentPackBattle.setInProgress(stub, 3);
+    await message.channel.send(progRes ? '✅ in_progress OK' : '❌ in_progress failed (see bot logs)');
+
+    await new Promise((r) => setTimeout(r, 4000));
+
+    await message.channel.send('🧪 Pushing homepage widget: **idle** (clear)…');
+    const clearRes = await currentPackBattle.clear();
+    await message.channel.send(clearRes ? '✅ idle OK' : '❌ idle failed (see bot logs)');
 }
 
 async function battleStatus(message) {
