@@ -38,6 +38,7 @@ Key variables:
 - `MINECRAFT_JAVA_INVITE` — intro text that appears above the Java whitelist button in the DM. Java Realms don't expose shareable URLs, so reacting 🪓 DMs an intro + button → modal → `#ops` whitelist request (pings Akivili). Vincent adds the submitted Minecraft Java username to the Realm allowlist manually.
 - `BOT_PORT` — Express webhook server port (default 3100)
 - `SHOP_URL`, `SITE_URL`, `LIVESTREAM_SECRET` — public URLs and livestream toggle secret
+- `QUEUE_SOURCE` — `sqlite` (default, legacy local tables) or `wp` (WordPress as source of truth via `/shop/v1/queue/*`). Switch after running `scripts/migrate-queue-to-wp.js` and validating in staging — see [Queue cutover](#queue-cutover)
 
 ## Structure
 
@@ -45,7 +46,9 @@ Key variables:
 |------|---------|
 | `index.js` | Entry point — initializes Discord client, registers commands, starts webhook server |
 | `config.js` | Environment config loader, Discord channel and role IDs, pricing constants |
-| `db.js` | SQLite schema and query layer (`better-sqlite3`) — purchases, queues, battles, card listings, pulls, giveaways, community goals |
+| `db.js` | SQLite schema and query layer (`better-sqlite3`) — purchases, queues (legacy, when `QUEUE_SOURCE=sqlite`), battles, card listings, pulls, giveaways, community goals |
+| `lib/queue-source.js` | Adapter selector — switches all queue ops between `lib/sqlite-queue.js` and `lib/wp-queue.js` based on `QUEUE_SOURCE` env |
+| `lib/queue-broadcaster.js` | SSE broadcaster — receives `queue.changed` webhook from WordPress and re-streams to all connected clients (the itzenzo.tv homepage Live Queue section) |
 | `discord.js` | Discord client helpers — channel sends, DMs, embeds |
 | `server.js` | Express webhook endpoints (Stripe, Twitch) |
 | `shipping.js` | Shipping calculation — flat-rate domestic and international |
@@ -73,6 +76,20 @@ Key variables:
 | `scripts/shop/discord-security.js` | Security lockdown helpers |
 | `scripts/shop/discord-migrate.js` | Bulk Discord structure migrations |
 | `scripts/shop/create-test-products.js` | Seed test products in Stripe |
+| `scripts/migrate-queue-to-wp.js` | One-shot migration of recent SQLite queues into the WordPress unified queue (`--limit=N`, `--dry-run`). Idempotent via external_ref. |
+
+## Queue cutover
+
+The queue (orders, pack battles, pull boxes, RTS) lived in local SQLite (`queues` + `queue_entries` tables). It now also lives in WordPress (`wp_queue_sessions` + `wp_queue_entries`), where it can be exposed to the itzenzo.tv homepage and admin tooling.
+
+To migrate:
+
+1. Run `node scripts/migrate-queue-to-wp.js --dry-run` and review output
+2. Run `node scripts/migrate-queue-to-wp.js --limit=20` to copy recent sessions
+3. Set `QUEUE_SOURCE=wp` in `/opt/nous-bot/.env` and restart the systemd service
+4. Verify `!queue` and the itzenzo.tv homepage Live Queue section both show the same data
+
+To roll back: set `QUEUE_SOURCE=sqlite` and restart. Local SQLite tables are still maintained alongside WP writes, so nothing is lost.
 
 ## Deployment
 

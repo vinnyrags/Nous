@@ -196,13 +196,29 @@ async function runCardNightFlow(testChannel) {
     const rhapttv = buildTestMention();
     let sellListingId, reservedListingId, listSessionId, gammaListingId, pullListingId;
 
-    await testChannel.send({ embeds: [new EmbedBuilder().setTitle('🌙 Card Night Critical Path').setDescription('Starting...').setColor(0xceff00)] });
+    await testChannel.send({ embeds: [new EmbedBuilder()
+        .setTitle('🌙 Card Night Critical Path')
+        .setDescription(`Starting... (queue source: **${config.QUEUE_SOURCE}**)`)
+        .setColor(0xceff00)] });
 
     // --- SETUP ---
     results.push(await step('Link test account', async () => {
         purchases.linkDiscord.run(TEST_USER_ID, TEST_EMAIL);
         const link = purchases.getEmailByDiscordId.get(TEST_USER_ID);
         if (!link) throw new Error('Discord link not created');
+    }));
+
+    // Probe the active queue source — fails loud if QUEUE_SOURCE=wp can't
+    // reach WordPress, so we don't silently pass the rest of the suite
+    // against a degraded backend.
+    results.push(await step(`Queue source reachable (${config.QUEUE_SOURCE})`, async () => {
+        const probe = await queueSource.getActiveQueue();
+        // A null result is fine (means no open session); the call succeeding
+        // is what we care about. An exception here means the backend is
+        // unreachable (WP down, secret mismatch, etc).
+        if (probe !== null && typeof probe !== 'object') {
+            throw new Error(`Unexpected queue source response shape: ${typeof probe}`);
+        }
     }));
 
     // --- PRE-STREAM ---
