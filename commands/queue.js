@@ -20,7 +20,7 @@
 
 import { EmbedBuilder } from 'discord.js';
 import config from '../config.js';
-import { queues } from '../db.js';
+import * as queueSource from '../lib/queue-source.js';
 import { client, getChannel, sendEmbed, getMember, addRole } from '../discord.js';
 
 // =========================================================================
@@ -48,14 +48,14 @@ async function handleQueue(message, args) {
 }
 
 async function openQueue(message) {
-    const active = queues.getActiveQueue.get();
+    const active = await queueSource.getActiveQueue();
     if (active) {
         return message.reply(`There's already an open queue (Queue #${active.id}). Close it first with \`!queue close\`.`);
     }
 
-    const result = queues.createQueue.run();
+    const result = await queueSource.createQueue();
     const queueId = result.lastInsertRowid;
-    const queue = queues.getQueueById.get(queueId);
+    const queue = result.session ?? (await queueSource.getQueueById(queueId));
 
     // Post real-time embed to #queue channel
     await postQueueChannelEmbed(queue);
@@ -70,15 +70,15 @@ async function openQueue(message) {
 }
 
 async function closeQueue(message) {
-    const active = queues.getActiveQueue.get();
+    const active = await queueSource.getActiveQueue();
     if (!active) {
         return message.reply('No open queue to close.');
     }
 
-    queues.closeQueue.run(active.id);
+    await queueSource.closeQueue(active.id);
 
-    const entries = queues.getEntries.all(active.id);
-    const uniqueBuyers = queues.getUniqueBuyers.all(active.id);
+    const entries = await queueSource.getEntries(active.id);
+    const uniqueBuyers = await queueSource.getUniqueBuyers(active.id);
     const embed = buildQueueEmbed(active, entries, uniqueBuyers, 'closed');
 
     // Update #queue channel embed to closed state
@@ -90,31 +90,31 @@ async function closeQueue(message) {
 }
 
 async function showQueue(message) {
-    const active = queues.getActiveQueue.get();
+    const active = await queueSource.getActiveQueue();
     if (!active) {
         return message.reply('No open queue right now. A mod can start one with `!queue open`.');
     }
 
-    const entries = queues.getEntries.all(active.id);
-    const uniqueBuyers = queues.getUniqueBuyers.all(active.id);
+    const entries = await queueSource.getEntries(active.id);
+    const uniqueBuyers = await queueSource.getUniqueBuyers(active.id);
     const embed = buildQueueEmbed(active, entries, uniqueBuyers, 'open');
 
     await message.channel.send({ embeds: [embed] });
 }
 
 async function queueHistory(message) {
-    const recent = queues.getRecentQueues.all(5);
+    const recent = await queueSource.getRecentQueues(5);
 
     if (!recent.length) {
         return message.reply('No queue history yet.');
     }
 
-    const lines = recent.map((q) => {
-        const entries = queues.getEntries.all(q.id);
-        const buyers = queues.getUniqueBuyers.all(q.id);
+    const lines = await Promise.all(recent.map(async (q) => {
+        const entries = q.total_entries !== undefined ? new Array(q.total_entries) : await queueSource.getEntries(q.id);
+        const buyers = await queueSource.getUniqueBuyers(q.id);
         const winner = q.duck_race_winner_id ? `<@${q.duck_race_winner_id}>` : 'No winner';
         return `**Queue #${q.id}** — ${entries.length} items, ${buyers.length} buyers • Duck race: ${winner} • ${q.created_at.slice(0, 10)}`;
-    });
+    }));
 
     const embed = new EmbedBuilder()
         .setTitle('📋 Recent Queues')
@@ -156,20 +156,20 @@ async function handleDuckRace(message, args) {
 /**
  * Find the current raceable queue — active or most recent closed without a winner.
  */
-function findRaceableQueue() {
-    const active = queues.getActiveQueue.get();
+async function findRaceableQueue() {
+    const active = await queueSource.getActiveQueue();
     if (active) return active;
-    const recent = queues.getRecentQueues.all(1);
+    const recent = await queueSource.getRecentQueues(1);
     return recent.length && !recent[0].duck_race_winner_id ? recent[0] : null;
 }
 
 async function showDuckRace(message) {
-    const queue = findRaceableQueue();
+    const queue = await findRaceableQueue();
     if (!queue) {
         return message.reply('No active queue with a duck race roster.');
     }
 
-    const uniqueBuyers = queues.getUniqueBuyers.all(queue.id);
+    const uniqueBuyers = await queueSource.getUniqueBuyers(queue.id);
     if (!uniqueBuyers.length) {
         return message.reply('No entries in the duck race yet — queue has no purchases.');
     }
@@ -209,21 +209,21 @@ async function pickDuckRace(message, args) {
 }
 
 async function runAnimatedRace(message, pickedWinnerId) {
-    const queue = findRaceableQueue();
+    const queue = await findRaceableQueue();
     if (!queue) {
         return message.reply('No queue found to run a duck race for.');
     }
 
     // Atomically claim the queue for racing — prevents double-start
-    const claimed = queues.claimForRace.run(queue.id);
+    const claimed = await queueSource.claimForRace(queue.id);
     if (claimed.changes === 0) {
         return message.reply('A duck race is already in progress!');
     }
 
-    const uniqueBuyers = queues.getUniqueBuyers.all(queue.id);
+    const uniqueBuyers = await queueSource.getUniqueBuyers(queue.id);
     if (uniqueBuyers.length < 2) {
         // Release the claim — revert to closed
-        queues.closeQueue.run(queue.id);
+        await queueSource.closeQueue(queue.id);
         return message.reply('Need at least 2 ducks for a race!');
     }
 
@@ -231,7 +231,7 @@ async function runAnimatedRace(message, pickedWinnerId) {
     if (pickedWinnerId) {
         const inRoster = uniqueBuyers.some((b) => b.buyer === pickedWinnerId);
         if (!inRoster) {
-            queues.closeQueue.run(queue.id);
+            await queueSource.closeQueue(queue.id);
             return message.channel.send(`<@${pickedWinnerId}> is not in the duck race roster.`);
         }
         await message.channel.send(`🦆 Duck race picked. Starting race in <#${config.CHANNELS.QUEUE}>...`);
@@ -248,7 +248,7 @@ async function runAnimatedRace(message, pickedWinnerId) {
         // Post initial "starting" embed to #queue
         const queueChannel = getChannel('QUEUE');
         if (!queueChannel) {
-            queues.closeQueue.run(queue.id);
+            await queueSource.closeQueue(queue.id);
             return message.reply('Cannot find #queue channel.');
         }
 
@@ -273,7 +273,7 @@ async function runAnimatedRace(message, pickedWinnerId) {
         await finalizeDuckRace(queue.id, winnerId, uniqueBuyers.length, message);
     } catch (e) {
         // On error, revert queue status so it can be retried
-        queues.closeQueue.run(queue.id);
+        await queueSource.closeQueue(queue.id);
         throw e;
     }
 }
@@ -350,7 +350,7 @@ function buildRaceEmbed(queueId, frame, isFinished, totalDucks) {
 // -------------------------------------------------------------------------
 
 async function finalizeDuckRace(queueId, winnerId, entryCount, message) {
-    queues.setDuckRaceWinner.run(winnerId, queueId);
+    await queueSource.setDuckRaceWinner(winnerId, queueId);
 
     // Assign Aha role
     const member = await getMember(winnerId);
@@ -361,7 +361,7 @@ async function finalizeDuckRace(queueId, winnerId, entryCount, message) {
     // Update #queue channel embed with winner
     await updateQueueChannelEmbed(queueId);
 
-    const entries = queues.getEntries.all(queueId);
+    const entries = await queueSource.getEntries(queueId);
     const winnerLabel = /^\d+$/.test(winnerId) ? `<@${winnerId}>` : winnerId;
 
     // Post winner in current channel (or #queue if command was deleted)
@@ -380,8 +380,8 @@ async function finalizeDuckRace(queueId, winnerId, entryCount, message) {
     });
 
     // Open next queue for pre-orders
-    const newQueueResult = queues.createQueue.run();
-    const newQueue = queues.getQueueById.get(newQueueResult.lastInsertRowid);
+    const newQueueResult = await queueSource.createQueue();
+    const newQueue = newQueueResult.session ?? (await queueSource.getQueueById(newQueueResult.lastInsertRowid));
     await postQueueChannelEmbed(newQueue);
 
     await message.channel.send(`\uD83D\uDCCB Queue #${queueId} closed. Queue #${newQueue.id} opened for next stream.`);
@@ -397,13 +397,13 @@ async function declareDuckRaceWinner(message, args) {
         return message.reply('Usage: `!duckrace winner @user`');
     }
 
-    const queue = findRaceableQueue();
+    const queue = await findRaceableQueue();
     if (!queue) {
         return message.reply('No queue found to assign a duck race winner to.');
     }
 
     // Verify winner is actually in the roster
-    const uniqueBuyers = queues.getUniqueBuyers.all(queue.id);
+    const uniqueBuyers = await queueSource.getUniqueBuyers(queue.id);
     const isInRoster = uniqueBuyers.some((b) => b.buyer === mentioned.id);
     if (!isInRoster) {
         return message.reply(`<@${mentioned.id}> is not in the duck race roster for Queue #${queue.id}.`);
@@ -411,7 +411,7 @@ async function declareDuckRaceWinner(message, args) {
 
     // Close the queue first if still open
     if (queue.status === 'open') {
-        queues.closeQueue.run(queue.id);
+        await queueSource.closeQueue(queue.id);
     }
 
     await finalizeDuckRace(queue.id, mentioned.id, uniqueBuyers.length, message);
@@ -429,13 +429,13 @@ async function postQueueChannelEmbed(queue) {
         const channel = getChannel('QUEUE');
         if (!channel) return;
 
-        const entries = queues.getEntries.all(queue.id);
-        const uniqueBuyers = queues.getUniqueBuyers.all(queue.id);
+        const entries = await queueSource.getEntries(queue.id);
+        const uniqueBuyers = await queueSource.getUniqueBuyers(queue.id);
         const status = queue.duck_race_winner_id ? 'complete' : queue.status;
         const embed = buildQueueEmbed(queue, entries, uniqueBuyers, status);
 
         const msg = await channel.send({ embeds: [embed] });
-        queues.setChannelMessage.run(msg.id, queue.id);
+        await queueSource.setChannelMessage(msg.id, queue.id);
     } catch (e) {
         console.error('Failed to post queue channel embed:', e.message);
     }
@@ -447,14 +447,14 @@ async function postQueueChannelEmbed(queue) {
  */
 async function updateQueueChannelEmbed(queueId) {
     try {
-        const queue = queues.getQueueById.get(queueId);
+        const queue = await queueSource.getQueueById(queueId);
         if (!queue) return;
 
         const channel = getChannel('QUEUE');
         if (!channel) return;
 
-        const entries = queues.getEntries.all(queue.id);
-        const uniqueBuyers = queues.getUniqueBuyers.all(queue.id);
+        const entries = await queueSource.getEntries(queue.id);
+        const uniqueBuyers = await queueSource.getUniqueBuyers(queue.id);
         const status = queue.duck_race_winner_id ? 'complete' : queue.status;
         const embed = buildQueueEmbed(queue, entries, uniqueBuyers, status);
 
@@ -469,7 +469,7 @@ async function updateQueueChannelEmbed(queueId) {
         }
 
         const msg = await channel.send({ embeds: [embed] });
-        queues.setChannelMessage.run(msg.id, queue.id);
+        await queueSource.setChannelMessage(msg.id, queue.id);
     } catch (e) {
         console.error('Failed to update queue channel embed:', e.message);
     }
@@ -485,7 +485,9 @@ function buildQueueDescription(entries, uniqueBuyers) {
     const lines = entries.map((entry, i) => {
         const key = entry.discord_user_id || entry.customer_email || 'Unknown';
         const label = key === 'Unknown' ? key : /^\d+$/.test(key) ? `<@${key}>` : key;
-        const product = `${entry.product_name}${entry.quantity > 1 ? ` ×${entry.quantity}` : ''}`;
+        const productLabel = entry.product_name || entry.detail_label || 'Entry';
+        const qty = entry.quantity || 1;
+        const product = `${productLabel}${qty > 1 ? ` ×${qty}` : ''}`;
         return `${i + 1}. ${label} — ${product}`;
     });
 
@@ -520,10 +522,20 @@ function buildQueueEmbed(queue, entries, uniqueBuyers, status) {
  * Returns true if added, false if no active queue.
  */
 async function addToQueue(discordUserId, customerEmail, productName, quantity, stripeSessionId) {
-    const active = queues.getActiveQueue.get();
+    const active = await queueSource.getActiveQueue();
     if (!active) return false;
 
-    queues.addEntry.run(active.id, discordUserId, customerEmail, productName, quantity, stripeSessionId);
+    await queueSource.addEntry({
+        queueId: active.id,
+        discordUserId,
+        customerEmail,
+        productName,
+        quantity,
+        stripeSessionId,
+        type: 'order',
+        source: 'shop',
+        externalRef: stripeSessionId ? `stripe:${stripeSessionId}` : null,
+    });
 
     // Update the real-time #queue channel embed
     await updateQueueChannelEmbed(active.id);

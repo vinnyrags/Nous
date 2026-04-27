@@ -17,7 +17,8 @@
 
 import { EmbedBuilder } from 'discord.js';
 import config from '../config.js';
-import { purchases, discordLinks, queues, shipping, tracking } from '../db.js';
+import { purchases, discordLinks, shipping, tracking } from '../db.js';
+import * as queueSource from '../lib/queue-source.js';
 import { getMember, sendEmbed, sendToChannel } from '../discord.js';
 
 async function handleDroppedOff(message, args = []) {
@@ -32,9 +33,9 @@ async function handleDroppedOff(message, args = []) {
     let unshipped = purchases.getUnshipped.all();
 
     // Exclude purchases in the active pre-order queue (not yet opened on stream)
-    const activeQueue = queues.getActiveQueue.get();
+    const activeQueue = await queueSource.getActiveQueue();
     if (activeQueue) {
-        const activeEntries = queues.getEntries.all(activeQueue.id);
+        const activeEntries = await queueSource.getEntries(activeQueue.id);
         const activeSessionIds = new Set(activeEntries.map((e) => e.stripe_session_id).filter(Boolean));
         const before = unshipped.length;
         unshipped = unshipped.filter((row) => !activeSessionIds.has(row.stripe_session_id));

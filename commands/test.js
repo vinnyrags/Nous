@@ -15,7 +15,8 @@ import { EmbedBuilder } from 'discord.js';
 import crypto from 'node:crypto';
 import Stripe from 'stripe';
 import config from '../config.js';
-import { db, purchases, cardListings, listSessions, battles, queues, giveaways, discordLinks, goals, tracking } from '../db.js';
+import { db, purchases, cardListings, listSessions, battles, giveaways, discordLinks, goals, tracking } from '../db.js';
+import * as queueSource from '../lib/queue-source.js';
 import { client, getChannel, setChannelOverride, clearChannelOverrides, getMember } from '../discord.js';
 import { handleSell, handleList, handleSold } from './card-shop.js';
 import { handlePull } from './pull.js';
@@ -509,10 +510,20 @@ async function runCardNightFlow(testChannel) {
 
     // --- DUCK RACE (animated, preselected) ---
     results.push(await step('Inject fake queue buyers', async () => {
-        const queue = queues.getActiveQueue.get();
+        const queue = await queueSource.getActiveQueue();
         if (!queue) throw new Error('No active queue');
         for (let i = 0; i < 5; i++) {
-            queues.addEntry.run(queue.id, `fake_${String(i).padStart(3, '0')}`, `fake${i}@test.com`, 'TEST Product', 1, `fake_session_${i}`);
+            await queueSource.addEntry({
+                queueId: queue.id,
+                discordUserId: `fake_${String(i).padStart(3, '0')}`,
+                customerEmail: `fake${i}@test.com`,
+                productName: 'TEST Product',
+                quantity: 1,
+                stripeSessionId: `fake_session_${i}`,
+                type: 'order',
+                source: 'shop',
+                externalRef: `test:fake_session_${i}`,
+            });
         }
     }));
 
@@ -541,11 +552,21 @@ async function runCardNightFlow(testChannel) {
 
     // --- DUCK RACE (random — no preselect) ---
     results.push(await step('Inject buyers for random duck race', async () => {
-        const queue = queues.getActiveQueue.get();
+        const queue = await queueSource.getActiveQueue();
         if (!queue) throw new Error('No active queue after pick race');
-        queues.addEntry.run(queue.id, TEST_USER_ID, TEST_EMAIL, 'TEST Product', 1, `fake_random_${Date.now()}`);
+        const ref = `fake_random_${Date.now()}`;
+        await queueSource.addEntry({
+            queueId: queue.id, discordUserId: TEST_USER_ID, customerEmail: TEST_EMAIL,
+            productName: 'TEST Product', quantity: 1, stripeSessionId: ref,
+            type: 'order', source: 'shop', externalRef: `test:${ref}`,
+        });
         for (let i = 0; i < 4; i++) {
-            queues.addEntry.run(queue.id, `random_fake_${i}`, `rfake${i}@test.com`, 'TEST Product', 1, `fake_random_session_${i}`);
+            await queueSource.addEntry({
+                queueId: queue.id, discordUserId: `random_fake_${i}`,
+                customerEmail: `rfake${i}@test.com`, productName: 'TEST Product',
+                quantity: 1, stripeSessionId: `fake_random_session_${i}`,
+                type: 'order', source: 'shop', externalRef: `test:fake_random_session_${i}`,
+            });
         }
     }));
 
@@ -558,11 +579,21 @@ async function runCardNightFlow(testChannel) {
 
     // --- DUCK RACE (manual winner) ---
     results.push(await step('Inject buyers for manual duck race', async () => {
-        const queue = queues.getActiveQueue.get();
+        const queue = await queueSource.getActiveQueue();
         if (!queue) throw new Error('No active queue after random race');
-        queues.addEntry.run(queue.id, TEST_USER_ID, TEST_EMAIL, 'TEST Product', 1, `fake_manual_${Date.now()}`);
+        const ref = `fake_manual_${Date.now()}`;
+        await queueSource.addEntry({
+            queueId: queue.id, discordUserId: TEST_USER_ID, customerEmail: TEST_EMAIL,
+            productName: 'TEST Product', quantity: 1, stripeSessionId: ref,
+            type: 'order', source: 'shop', externalRef: `test:${ref}`,
+        });
         for (let i = 0; i < 3; i++) {
-            queues.addEntry.run(queue.id, `manual_fake_${i}`, `mfake${i}@test.com`, 'TEST Product', 1, `fake_manual_session_${i}`);
+            await queueSource.addEntry({
+                queueId: queue.id, discordUserId: `manual_fake_${i}`,
+                customerEmail: `mfake${i}@test.com`, productName: 'TEST Product',
+                quantity: 1, stripeSessionId: `fake_manual_session_${i}`,
+                type: 'order', source: 'shop', externalRef: `test:fake_manual_session_${i}`,
+            });
         }
     }));
 
@@ -896,22 +927,32 @@ async function runRaceConditionFlow(testChannel) {
 
     // --- DUCK RACE: atomic claimForRace ---
     results.push(await step('Duck race: only one race can claim a queue', async () => {
-        queues.createQueue.run();
-        const queue = queues.getActiveQueue.get();
-        queues.addEntry.run(queue.id, 'race_user_1', 'r1@test.com', 'Product', 1, `race_s1_${Date.now()}`);
-        queues.addEntry.run(queue.id, 'race_user_2', 'r2@test.com', 'Product', 1, `race_s2_${Date.now()}`);
+        await queueSource.createQueue();
+        const queue = await queueSource.getActiveQueue();
+        const s1 = `race_s1_${Date.now()}`;
+        const s2 = `race_s2_${Date.now()}`;
+        await queueSource.addEntry({
+            queueId: queue.id, discordUserId: 'race_user_1', customerEmail: 'r1@test.com',
+            productName: 'Product', quantity: 1, stripeSessionId: s1,
+            type: 'order', source: 'shop', externalRef: `test:${s1}`,
+        });
+        await queueSource.addEntry({
+            queueId: queue.id, discordUserId: 'race_user_2', customerEmail: 'r2@test.com',
+            productName: 'Product', quantity: 1, stripeSessionId: s2,
+            type: 'order', source: 'shop', externalRef: `test:${s2}`,
+        });
 
-        const claim1 = queues.claimForRace.run(queue.id);
-        const claim2 = queues.claimForRace.run(queue.id);
+        const claim1 = await queueSource.claimForRace(queue.id);
+        const claim2 = await queueSource.claimForRace(queue.id);
 
         if (claim1.changes !== 1) throw new Error('First claim should succeed');
         if (claim2.changes !== 0) throw new Error('Second claim should fail');
 
-        const q = queues.getQueueById.get(queue.id);
+        const q = await queueSource.getQueueById(queue.id);
         if (q.status !== 'racing') throw new Error(`Queue status should be racing, got: ${q.status}`);
 
         // Clean up — set winner so finalize flow works
-        queues.setDuckRaceWinner.run('race_user_1', queue.id);
+        await queueSource.setDuckRaceWinner('race_user_1', queue.id);
         await testChannel.send('> ✅ Two races tried to start — only the first claimed the queue');
     }));
 

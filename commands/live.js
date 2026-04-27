@@ -11,7 +11,8 @@
 
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import config from '../config.js';
-import { livestream, queues, analytics, goals } from '../db.js';
+import { livestream, analytics, goals } from '../db.js';
+import * as queueSource from '../lib/queue-source.js';
 import { sendEmbed, sendToChannel, getGuild } from '../discord.js';
 import { postQueueChannelEmbed, updateQueueChannelEmbed } from './queue.js';
 
@@ -37,10 +38,10 @@ async function handleLive(message) {
     startReminder();
 
     // Auto-open queue if none exists (first stream or manual close)
-    let activeQueue = queues.getActiveQueue.get();
+    let activeQueue = await queueSource.getActiveQueue();
     if (!activeQueue) {
-        const queueResult = queues.createQueue.run();
-        activeQueue = queues.getActiveQueue.get();
+        const queueResult = await queueSource.createQueue();
+        activeQueue = queueResult.session ?? (await queueSource.getActiveQueue());
         await postQueueChannelEmbed(activeQueue);
         await message.channel.send({ embeds: [new EmbedBuilder()
             .setDescription(`📋 No queue was open — auto-opened queue #${activeQueue.id}`)
@@ -49,8 +50,8 @@ async function handleLive(message) {
 
     // Post pre-order summary if queue has entries (but keep it open)
     if (activeQueue) {
-        const entries = queues.getEntries.all(activeQueue.id);
-        const uniqueBuyers = queues.getUniqueBuyers.all(activeQueue.id);
+        const entries = await queueSource.getEntries(activeQueue.id);
+        const uniqueBuyers = await queueSource.getUniqueBuyers(activeQueue.id);
 
         if (entries.length > 0) {
             await sendEmbed('ANNOUNCEMENTS', {
@@ -123,14 +124,14 @@ async function handleOffline(message) {
     cancelReminder();
 
     // Find the most recently completed queue for the recap
-    const recentQueues = queues.getRecentQueues.all(1);
+    const recentQueues = await queueSource.getRecentQueues(1);
     const closedQueueId = recentQueues.length ? recentQueues[0].id : null;
 
     // Ensure a queue is open for next stream's pre-orders
-    let activeQueue = queues.getActiveQueue.get();
+    let activeQueue = await queueSource.getActiveQueue();
     if (!activeQueue) {
-        const queueResult = queues.createQueue.run();
-        activeQueue = queues.getQueueById.get(queueResult.lastInsertRowid);
+        const queueResult = await queueSource.createQueue();
+        activeQueue = queueResult.session ?? (await queueSource.getQueueById(queueResult.lastInsertRowid));
         await postQueueChannelEmbed(activeQueue);
     }
 
@@ -166,6 +167,7 @@ function formatDollars(cents) {
 }
 
 async function postStreamRecap(session, closedQueueId) {
+    // ↓ marked async so the queue lookups can await queueSource (WP REST when flag flipped)
     const startTime = session.created_at;
     const endTime = new Date().toISOString();
 
@@ -181,8 +183,8 @@ async function postStreamRecap(session, closedQueueId) {
     let queueEntryCount = 0;
     let queueBuyerCount = 0;
     if (closedQueueId) {
-        const entries = queues.getEntries.all(closedQueueId);
-        const uniqueBuyers = queues.getUniqueBuyers.all(closedQueueId);
+        const entries = await queueSource.getEntries(closedQueueId);
+        const uniqueBuyers = await queueSource.getUniqueBuyers(closedQueueId);
         queueEntryCount = entries.length;
         queueBuyerCount = uniqueBuyers.length;
     }

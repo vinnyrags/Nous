@@ -47,6 +47,11 @@ export default {
     SITE_URL: optional('SITE_URL', 'https://vincentragosta.io'),
     LIVESTREAM_SECRET: optional('LIVESTREAM_SECRET', 'itzenzo-live'),
 
+    // Where queue data lives. 'sqlite' = local SQLite (legacy), 'wp' = WordPress
+    // REST as source of truth. Switch via QUEUE_SOURCE env once shadow validation
+    // passes (see Phase 6 cutover plan).
+    QUEUE_SOURCE: optional('QUEUE_SOURCE', 'sqlite'),
+
     // Channel IDs
     CHANNELS: {
         ANNOUNCEMENTS: '862806276639293510',
