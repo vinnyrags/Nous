@@ -16,7 +16,10 @@ import { sendEmbed } from '../discord.js';
  * HMAC SHA256 of: METHOD&PATH&sorted_query_params&body
  */
 function verifySignature(req) {
-    if (!config.SHIPPINGEASY_API_SECRET) return true; // skip if no secret configured
+    // Reject when the secret is unconfigured. Returning true here was a
+    // security bug — it let any unsigned request mark fake tracking numbers
+    // and trigger downstream state changes.
+    if (!config.SHIPPINGEASY_API_SECRET) return false;
 
     const signature = req.headers['x-se-api-signature'] || req.query.api_signature;
     if (!signature) return false;
