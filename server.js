@@ -18,6 +18,7 @@ import { handleTwitchWebhook } from './webhooks/twitch.js';
 import { handleShippingEasyWebhook } from './webhooks/shippingeasy.js';
 import { handleCardRequestCritical, handleCardRequestNotifications } from './webhooks/card-request.js';
 import { createLimiter } from './webhook-limiter.js';
+import { addClient, broadcast as broadcastQueue, clientCount } from './lib/queue-broadcaster.js';
 
 const webhookLimit = createLimiter(10);
 import {
@@ -131,6 +132,50 @@ app.post('/webhooks/card-request-notify', express.json(), async (req, res) => {
         console.error('Card request webhook error:', e.message);
         res.sendStatus(200);
     }
+});
+
+// =========================================================================
+// Live queue — WP fires `queue.changed` events; we relay them to all
+// connected SSE clients (the itzenzo.tv homepage LIVE QUEUE section).
+// =========================================================================
+
+app.post('/webhooks/queue-changed', express.json({ limit: '256kb' }), (req, res) => {
+    const providedSecret = req.get('X-Bot-Secret') || '';
+    if (!config.LIVESTREAM_SECRET || providedSecret !== config.LIVESTREAM_SECRET) {
+        return res.sendStatus(403);
+    }
+
+    const { event, data } = req.body || {};
+    if (typeof event !== 'string' || !event) {
+        return res.sendStatus(400);
+    }
+
+    try {
+        broadcastQueue(event, data ?? {});
+        res.sendStatus(200);
+    } catch (e) {
+        console.error('queue-changed broadcast failed:', e.message);
+        res.sendStatus(500);
+    }
+});
+
+app.get('/queue/stream', (req, res) => {
+    res.set({
+        'Content-Type':      'text/event-stream',
+        'Cache-Control':     'no-cache, no-transform',
+        Connection:          'keep-alive',
+        'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders();
+    res.write('retry: 5000\n\n');
+
+    const lastEventId = req.get('Last-Event-ID') || req.query.lastEventId || null;
+    const cleanup = addClient(res, lastEventId);
+
+    req.on('close', () => {
+        cleanup();
+        try { res.end(); } catch { /* already ended */ }
+    });
 });
 
 // =========================================================================
@@ -389,6 +434,10 @@ app.get('/shipping/lookup', (req, res) => {
 // =========================================================================
 // Health check
 // =========================================================================
+
+app.get('/queue/stream/stats', (req, res) => {
+    res.json({ connectedClients: clientCount() });
+});
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', uptime: process.uptime() });

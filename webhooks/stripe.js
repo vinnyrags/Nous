@@ -20,6 +20,7 @@ import { clearExpiryTimer, clearListingTtl, updateListingEmbed, updateListSessio
 import { addRevenue } from '../community-goals.js';
 import { recordShipping } from '../shipping.js';
 import { recordPullPurchase } from '../commands/pull.js';
+import * as queueSource from '../lib/queue-source.js';
 import { createOrder } from '../shippingeasy-api.js';
 
 const stripe = new Stripe(config.STRIPE_SECRET_KEY);
@@ -418,6 +419,31 @@ async function checkBattlePayment(session, discordUserId) {
     }
     battles.confirmPayment.run(session.id, battle.id, odiscordUserId);
 
+    // Mirror entry into the unified queue (when QUEUE_SOURCE=wp this hits
+    // WordPress; under sqlite this is a no-op since the SQLite adapter
+    // only handles `order` entries via addToQueue). Idempotent on
+    // external_ref so Stripe webhook retries don't duplicate.
+    try {
+        const activeQueue = await queueSource.getActiveQueue();
+        if (activeQueue) {
+            await queueSource.addEntry({
+                queueId: activeQueue.id,
+                discordUserId: discordUserId || null,
+                customerEmail: session.customer_details?.email || null,
+                productName: battle.product_name,
+                quantity: 1,
+                stripeSessionId: session.id,
+                type: 'pack_battle',
+                source: discordUserId ? 'discord' : 'shop',
+                externalRef: `stripe:${session.id}:battle`,
+                detailLabel: battle.product_name,
+                detailData: { battleId: battle.id, format: battle.format || null },
+            });
+        }
+    } catch (e) {
+        console.error('Failed to mirror pack-battle entry to queue:', e.message);
+    }
+
     const entries = battles.getEntries.all(battle.id);
     const paidEntries = battles.getPaidEntries.all(battle.id);
 
@@ -455,7 +481,7 @@ async function checkCardSalePayment(session, discordUserId, lineItems = []) {
     // Pull boxes stay open — record entry with buyer + quantity
     if (listing.status === 'pull') {
         const quantity = lineItems[0]?.quantity || 1;
-        await recordPullPurchase(listingId, discordUserId, session.customer_details?.email, quantity);
+        await recordPullPurchase(listingId, discordUserId, session.customer_details?.email, quantity, session.id);
         console.log(`Pull box #${listingId} purchase: ${listing.card_name} ×${quantity} for ${discordUserId || session.customer_details?.email}`);
         return;
     }

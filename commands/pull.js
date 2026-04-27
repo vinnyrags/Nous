@@ -15,6 +15,7 @@
 import { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } from 'discord.js';
 import config from '../config.js';
 import { cardListings, pullEntries } from '../db.js';
+import * as queueSource from '../lib/queue-source.js';
 import { client, getChannel, sendEmbed } from '../discord.js';
 import { formatShippingRate } from '../shipping.js';
 
@@ -207,7 +208,7 @@ function buildPullEmbed(name, priceCents, purchaseCount, entries = [], maxQuanti
  * Called by the Stripe webhook when a pull box purchase completes.
  * Increments the counter and updates the embed.
  */
-async function recordPullPurchase(listingId, discordUserId = null, customerEmail = null, quantity = 1) {
+async function recordPullPurchase(listingId, discordUserId = null, customerEmail = null, quantity = 1, stripeSessionId = null) {
     // Atomic capacity check — only increments if under the cap
     const result = cardListings.incrementPurchaseCountCapped.run(quantity, listingId, quantity);
 
@@ -227,6 +228,35 @@ async function recordPullPurchase(listingId, discordUserId = null, customerEmail
 
     // Record individual entry
     pullEntries.addEntry.run(listingId, discordUserId, customerEmail, quantity);
+
+    // Mirror to the unified queue. Tier inferred from the listing price ($1 / $2).
+    try {
+        const listingForQueue = cardListings.getById.get(listingId);
+        if (listingForQueue) {
+            const priceCents = Number(listingForQueue.price) || 0;
+            const tier = priceCents <= 100 ? 1 : 2;
+            const activeQueue = await queueSource.getActiveQueue();
+            if (activeQueue) {
+                await queueSource.addEntry({
+                    queueId: activeQueue.id,
+                    discordUserId,
+                    customerEmail,
+                    productName: listingForQueue.card_name,
+                    quantity,
+                    stripeSessionId,
+                    type: 'pull_box',
+                    source: discordUserId ? 'discord' : 'shop',
+                    externalRef: stripeSessionId
+                        ? `stripe:${stripeSessionId}:pull`
+                        : `pull:${listingId}:${discordUserId || customerEmail}:${Date.now()}`,
+                    detailLabel: `$${tier} tier`,
+                    detailData: { tier, listingId, cardName: listingForQueue.card_name },
+                });
+            }
+        }
+    } catch (e) {
+        console.error('Failed to mirror pull-box entry to queue:', e.message);
+    }
 
     const listing = cardListings.getById.get(listingId);
     if (!listing || !listing.message_id) return;
