@@ -60,7 +60,7 @@ Pull boxes are slot-based — each box has a finite number of numbered slots tha
 - `!pull close [v|vmax]`       — close (tier required only when both open)
 - `!pull status`                — list active boxes
 
-Homepage buyers pick specific slots via a modal grid. Discord buyers get auto-assigned slots via the Stripe webhook after payment. The on-stream embed in `#card-shop` shows a compact unicode slot grid (⬜ open, 🟪 claimed) that updates live as buys land.
+Homepage buyers pick specific slots via a modal grid. Discord buyers get a modal too — quantity input plus an optional comma-separated slot list (`17, 23, 41`); blank slots field auto-assigns the lowest open slots, filled-in slots are atomically pre-claimed through the same `/shop/v1/pull-box-checkout` endpoint the homepage uses. The on-stream embed in `#card-shop` shows a compact unicode slot grid (⬜ open, 🟪 claimed) that updates live as buys land.
 
 ## Structure
 

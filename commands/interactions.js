@@ -106,6 +106,12 @@ async function handleModalSubmit(interaction) {
         return handleJavaWhitelistSubmit(interaction);
     }
 
+    // Pull-box buy modal (slot picker for Discord buyers)
+    if (interaction.customId.startsWith('pull-buy-modal-')) {
+        const tier = interaction.customId.replace('pull-buy-modal-', '');
+        return handlePullBuyModalSubmit(interaction, tier);
+    }
+
     // Email linking modal (welcome channel)
     if (!interaction.customId.startsWith('email-link-')) return;
 
@@ -340,18 +346,86 @@ async function handleGiveawayButton(interaction, giveawayId) {
  * Pull box button handler — same as card buy but allows 'pull' status.
  */
 async function handlePullBuy(interaction, tier) {
-    const discordUserId = interaction.user.id;
-
-    await interaction.deferReply({ ephemeral: true });
-
     // Tier-based: resolve the active pull box for the requested tier
     // via WP. The legacy `pull-buy-<listingId>` customId path is gone —
     // any old embeds still showing that button will hit the not-found
     // branch below since `1234` is not a valid tier.
     if (tier !== 'v' && tier !== 'vmax') {
-        return interaction.editReply({
+        return interaction.reply({
             content: 'This pull-box embed is from a previous run and no longer routes anywhere. Run `!pull v|vmax "Name" <slots>` to open a new box.',
+            ephemeral: true,
         });
+    }
+
+    let box;
+    try {
+        box = await wpPullBox.getActiveBox(tier);
+    } catch (e) {
+        return interaction.reply({ content: `Pull-box service unreachable: ${e.message}`, ephemeral: true });
+    }
+
+    if (!box) {
+        return interaction.reply({ content: `No ${tier}-tier pull box is open right now.`, ephemeral: true });
+    }
+
+    const claimed = (box.claimedSlots || []).length;
+    const remaining = box.totalSlots - claimed;
+    if (remaining <= 0) {
+        return interaction.reply({ content: '🚫 This pull box is sold out!', ephemeral: true });
+    }
+
+    // Show a modal so the buyer can pick a quantity and (optionally) the
+    // specific slot numbers they want. Leaving the slots field blank
+    // falls through to the existing auto-assign-lowest-open-slots flow
+    // that the Stripe webhook handles after payment.
+    const modal = new ModalBuilder()
+        .setCustomId(`pull-buy-modal-${tier}`)
+        .setTitle(`Buy from ${box.name}`.slice(0, 45));
+
+    const qtyInput = new TextInputBuilder()
+        .setCustomId('quantity')
+        .setLabel(`How many pulls? (1-${Math.min(20, remaining)})`)
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setValue('1')
+        .setMaxLength(2);
+
+    const slotsInput = new TextInputBuilder()
+        .setCustomId('slots')
+        .setLabel('Specific slots? (optional)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setPlaceholder('e.g. 17, 23, 41 — leave blank for auto')
+        .setMaxLength(200);
+
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(qtyInput),
+        new ActionRowBuilder().addComponents(slotsInput),
+    );
+
+    await interaction.showModal(modal);
+}
+
+/**
+ * Handles the modal submission from handlePullBuy. Validates the quantity
+ * and (optional) slot numbers, then proxies to /shop/v1/pull-box-checkout
+ * which atomically pre-claims the slots and creates the Stripe session.
+ * Replies with the checkout URL.
+ */
+async function handlePullBuyModalSubmit(interaction, tier) {
+    const discordUserId = interaction.user.id;
+    await interaction.deferReply({ ephemeral: true });
+
+    if (tier !== 'v' && tier !== 'vmax') {
+        return interaction.editReply({ content: 'Invalid tier.' });
+    }
+
+    const qtyRaw = interaction.fields.getTextInputValue('quantity').trim();
+    const slotsRaw = interaction.fields.getTextInputValue('slots').trim();
+
+    const quantity = parseInt(qtyRaw, 10);
+    if (!Number.isFinite(quantity) || quantity < 1 || quantity > 20) {
+        return interaction.editReply({ content: 'Quantity must be a whole number between 1 and 20.' });
     }
 
     let box;
@@ -360,26 +434,96 @@ async function handlePullBuy(interaction, tier) {
     } catch (e) {
         return interaction.editReply({ content: `Pull-box service unreachable: ${e.message}` });
     }
-
     if (!box) {
-        return interaction.editReply({ content: `No ${tier}-tier pull box is open right now.` });
+        return interaction.editReply({ content: `${tier}-tier box closed since you opened the modal.` });
+    }
+    if (!box.stripePriceId) {
+        return interaction.editReply({ content: 'Box not fully configured (no Stripe price). Contact a mod.' });
     }
 
-    const claimed = (box.claimedSlots || []).length;
-    const remaining = box.totalSlots - claimed;
-    if (remaining <= 0) {
-        return interaction.editReply({ content: '🚫 This pull box is sold out!' });
+    let explicitSlots = null;
+    if (slotsRaw) {
+        explicitSlots = slotsRaw
+            .split(',')
+            .map((s) => parseInt(s.trim(), 10))
+            .filter((n) => Number.isFinite(n) && n > 0);
+        if (explicitSlots.length === 0) {
+            return interaction.editReply({ content: 'Could not parse slot numbers. Use comma-separated like `17, 23`.' });
+        }
+        if (explicitSlots.length !== quantity) {
+            return interaction.editReply({
+                content: `You picked ${explicitSlots.length} slot${explicitSlots.length === 1 ? '' : 's'} but said quantity ${quantity}. Make them match (or leave the slots field blank to auto-assign).`,
+            });
+        }
+        const dedup = [...new Set(explicitSlots)];
+        if (dedup.length !== explicitSlots.length) {
+            return interaction.editReply({ content: 'Duplicate slot numbers in your list — each slot can only be picked once.' });
+        }
+        for (const n of explicitSlots) {
+            if (n < 1 || n > box.totalSlots) {
+                return interaction.editReply({ content: `Slot ${n} is out of range (this box has slots 1-${box.totalSlots}).` });
+            }
+        }
+        const claimed = new Set((box.claimedSlots || []).map((c) => c.slotNumber));
+        const conflicts = explicitSlots.filter((n) => claimed.has(n));
+        if (conflicts.length > 0) {
+            return interaction.editReply({
+                content: `Slot${conflicts.length === 1 ? '' : 's'} ${conflicts.join(', ')} already claimed. Click Buy again to see the updated grid and pick others.`,
+            });
+        }
     }
 
-    const covered = hasShippingCoveredByDiscordId(discordUserId);
+    // Resolve buyer's email + Discord handle so the slot rows render
+    // with the friendly label without waiting for the post-payment webhook.
+    const link = purchases.getEmailByDiscordId.get(discordUserId);
+    const customerEmail = link?.customer_email || null;
+    let discordHandle = null;
+    try {
+        const member = await getMember(discordUserId);
+        discordHandle = member?.user?.username || member?.user?.tag || null;
+    } catch {
+        // member fetch failed; leave null. WP serializer falls back to email.
+    }
+
+    if (explicitSlots) {
+        // Slot-bound flow — call the public WP checkout endpoint which
+        // does the atomic pre-claim + Stripe session in one shot. This
+        // is the same flow the homepage modal uses, just hit from Discord.
+        try {
+            const res = await fetch(`${config.SITE_URL}/wp-json/shop/v1/pull-box-checkout`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    priceId: box.stripePriceId,
+                    slots: explicitSlots,
+                    customer_email: customerEmail,
+                    discord_user_id: discordUserId,
+                    discord_handle: discordHandle,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                if (res.status === 409) {
+                    return interaction.editReply({
+                        content: '⚠️ One or more of those slots were just claimed by someone else. Click Buy again to see the updated grid.',
+                    });
+                }
+                return interaction.editReply({ content: `Checkout failed: ${data.message || res.statusText}` });
+            }
+            return interaction.editReply({
+                content: `🎰 **${box.name}** — claiming slots ${explicitSlots.join(', ')}\n\n🛒 **[Complete checkout →](${data.url})**`,
+            });
+        } catch (e) {
+            return interaction.editReply({ content: `Network error reaching checkout: ${e.message}` });
+        }
+    }
+
+    // No slots specified — fall through to the existing auto-assign
+    // flow via the bot's /pull-box/checkout/:tier route. The Stripe
+    // webhook picks the lowest open slots after payment lands.
     const checkoutUrl = buildCheckoutUrl(`pull-box/checkout/${tier}`, discordUserId);
-
-    const shippingNote = covered
-        ? '✅ Shipping already covered this period!'
-        : `📦 Includes ${formatShippingRate(getShippingLabel(discordUserId).rate)} shipping`;
-
-    await interaction.editReply({
-        content: `🎰 **${box.name}** — $${(box.priceCents / 100).toFixed(2)}/pull (${remaining} slots remaining)\n${shippingNote}\n\n🛒 **[Buy Pull(s)](${checkoutUrl})**`,
+    return interaction.editReply({
+        content: `🎰 **${box.name}** — auto-assigning ${quantity} slot${quantity === 1 ? '' : 's'}\n\n🛒 **[Complete checkout →](${checkoutUrl})**`,
     });
 }
 
