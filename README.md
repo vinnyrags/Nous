@@ -49,6 +49,19 @@ Key variables:
 - **`!queue skip <position>`** — god-mode jump to any entry by homepage position (1-based). Position 1 is the active entry, positions 2+ are queued in oldest-first order. The previous active goes back to queued (not completed) so nothing is lost. Mods only.
 - `!duckrace` / `!duckrace start` / `!duckrace winner @user` — duck race roster + animation
 
+### Pull-box commands (livestream)
+
+Pull boxes are slot-based — each box has a finite number of numbered slots that buyers claim. WordPress is the source of truth (`wp_pull_boxes` + `wp_pull_box_slots`), Nous reads/writes via REST.
+
+- `!pull v "Vintage Box" 100`  — open a v-tier ($1) box with 100 slots
+- `!pull vmax "VMAX Box" 50`   — open a vmax-tier ($2) box with 50 slots
+- `!pull "Box" 1.00 100`       — legacy syntax, tier inferred from price ($1→v, $2→vmax)
+- `!pull replenish [v|vmax] 50` — add 50 slots without resetting claims
+- `!pull close [v|vmax]`       — close (tier required only when both open)
+- `!pull status`                — list active boxes
+
+Homepage buyers pick specific slots via a modal grid. Discord buyers get auto-assigned slots via the Stripe webhook after payment. The on-stream embed in `#card-shop` shows a compact unicode slot grid (⬜ open, 🟪 claimed) that updates live as buys land.
+
 ## Structure
 
 | Path | Purpose |
