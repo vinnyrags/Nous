@@ -532,7 +532,7 @@ function buildQueueEmbed(queue, entries, uniqueBuyers, status) {
  * `items` is an array of `{ name, quantity }`. Returns true if added,
  * false if no active queue.
  */
-async function addToQueue({ discordUserId, customerEmail, items, stripeSessionId }) {
+async function addToQueue({ discordUserId, discordHandle = null, customerEmail, items, stripeSessionId }) {
     const active = await queueSource.getActiveQueue();
     if (!active) return false;
     if (!Array.isArray(items) || items.length === 0) return false;
@@ -552,6 +552,7 @@ async function addToQueue({ discordUserId, customerEmail, items, stripeSessionId
     await queueSource.addEntry({
         queueId: active.id,
         discordUserId,
+        discordHandle,
         customerEmail,
         productName: detailLabel,
         quantity: totalQuantity,

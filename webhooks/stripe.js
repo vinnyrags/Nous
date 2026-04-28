@@ -243,19 +243,36 @@ async function handleCheckoutNotifications(session, context) {
     // single "Nx Item, Mx Item" label so multi-item orders show as a
     // single row everywhere (homepage Live Queue + Discord embed).
     if (session.metadata?.source !== 'pack-battle' && session.metadata?.source !== 'card-sale' && lineItems.length > 0) {
+        // Resolve the buyer's Discord handle so the homepage can render
+        // "@vinnyrags" instead of falling back to the redacted email when
+        // the email→discord_user_id link already exists. (For first-time
+        // buyers who entered the username at Stripe checkout, the handle
+        // was already known via findMemberByUsername a few lines above.)
+        let discordHandle = null;
+        if (discordUserId) {
+            try {
+                const member = await getMember(discordUserId);
+                discordHandle = member?.user?.username || member?.user?.tag || null;
+            } catch {
+                // Member fetch failed — proceed without; WP serializer falls
+                // back to redacted email, which is still recognizable to the buyer.
+            }
+        }
+
         const items = lineItems.map((item) => ({
             name: item.name || 'Unknown Product',
             quantity: item.quantity || 1,
         }));
         const added = await addToQueue({
             discordUserId,
+            discordHandle,
             customerEmail,
             items,
             stripeSessionId: session.id,
         });
         if (added) {
             const summary = items.map((i) => `${i.quantity}x ${i.name}`).join(', ');
-            console.log(`Queue entry: ${summary} for ${discordUserId || customerEmail}`);
+            console.log(`Queue entry: ${summary} for ${discordHandle || discordUserId || customerEmail}`);
         }
     }
 
