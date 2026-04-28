@@ -23,6 +23,7 @@ import config from '../config.js';
 import { purchases, cardListings, listSessions, battles, giveaways } from '../db.js';
 import { startExpiryTimer, clearListingTtl, updateListingEmbed, updateListSessionEmbed } from './card-shop.js';
 import { handleGiveawayEntry } from './giveaway.js';
+import * as wpPullBox from '../lib/wp-pull-box.js';
 import {
     handleJavaWhitelistButton,
     handleJavaWhitelistSubmit,
@@ -56,8 +57,8 @@ async function handleButtonInteraction(interaction) {
     }
 
     if (customId.startsWith('pull-buy-')) {
-        const listingId = customId.replace('pull-buy-', '');
-        return handlePullBuy(interaction, Number(listingId));
+        const tierOrLegacyId = customId.replace('pull-buy-', '');
+        return handlePullBuy(interaction, tierOrLegacyId);
     }
 
     if (customId.startsWith('battle-buy-')) {
@@ -338,30 +339,47 @@ async function handleGiveawayButton(interaction, giveawayId) {
 /**
  * Pull box button handler — same as card buy but allows 'pull' status.
  */
-async function handlePullBuy(interaction, listingId) {
+async function handlePullBuy(interaction, tier) {
     const discordUserId = interaction.user.id;
 
     await interaction.deferReply({ ephemeral: true });
 
-    const listing = cardListings.getById.get(listingId);
-    if (!listing || listing.status !== 'pull') {
-        return interaction.editReply({ content: 'This pull box is no longer available.' });
+    // Tier-based: resolve the active pull box for the requested tier
+    // via WP. The legacy `pull-buy-<listingId>` customId path is gone —
+    // any old embeds still showing that button will hit the not-found
+    // branch below since `1234` is not a valid tier.
+    if (tier !== 'v' && tier !== 'vmax') {
+        return interaction.editReply({
+            content: 'This pull-box embed is from a previous run and no longer routes anywhere. Run `!pull v|vmax "Name" <slots>` to open a new box.',
+        });
     }
 
-    // Check capacity
-    if (listing.max_quantity && listing.purchase_count >= listing.max_quantity) {
+    let box;
+    try {
+        box = await wpPullBox.getActiveBox(tier);
+    } catch (e) {
+        return interaction.editReply({ content: `Pull-box service unreachable: ${e.message}` });
+    }
+
+    if (!box) {
+        return interaction.editReply({ content: `No ${tier}-tier pull box is open right now.` });
+    }
+
+    const claimed = (box.claimedSlots || []).length;
+    const remaining = box.totalSlots - claimed;
+    if (remaining <= 0) {
         return interaction.editReply({ content: '🚫 This pull box is sold out!' });
     }
 
     const covered = hasShippingCoveredByDiscordId(discordUserId);
-    const checkoutUrl = buildCheckoutUrl(`card-shop/checkout/${listingId}`, discordUserId);
+    const checkoutUrl = buildCheckoutUrl(`pull-box/checkout/${tier}`, discordUserId);
 
     const shippingNote = covered
         ? '✅ Shipping already covered this period!'
         : `📦 Includes ${formatShippingRate(getShippingLabel(discordUserId).rate)} shipping`;
 
     await interaction.editReply({
-        content: `🎰 **${listing.card_name}** — $${(listing.price / 100).toFixed(2)}\n${shippingNote}\n\n🛒 **[Buy Pack(s)](${checkoutUrl})**`,
+        content: `🎰 **${box.name}** — $${(box.priceCents / 100).toFixed(2)}/pull (${remaining} slots remaining)\n${shippingNote}\n\n🛒 **[Buy Pull(s)](${checkoutUrl})**`,
     });
 }
 

@@ -307,6 +307,91 @@ app.get('/card-shop/checkout/:listingId', async (req, res) => {
 });
 
 // =========================================================================
+// Pull-box checkout — creates a Stripe session for a pull-box buy.
+// Tier-based: looks up the active pull box for the tier, uses its
+// configured Stripe price ID. Discord buyers don't pre-claim slots —
+// the webhook auto-picks the lowest open slots after payment.
+// =========================================================================
+
+app.get('/pull-box/checkout/:tier', async (req, res) => {
+    const tier = req.params.tier;
+    if (!['v', 'vmax'].includes(tier)) {
+        return res.status(400).send('Invalid tier. Must be v or vmax.');
+    }
+
+    const wpPullBox = await import('./lib/wp-pull-box.js');
+
+    let box;
+    try {
+        box = await wpPullBox.getActiveBox(tier);
+    } catch (e) {
+        console.error('Pull-box service unreachable:', e.message);
+        return res.status(503).send('Pull-box service unavailable. Try again in a moment.');
+    }
+    if (!box) {
+        return res.status(404).send('No pull box is currently open for this tier.');
+    }
+    if (!box.stripePriceId) {
+        console.error(`Pull box #${box.id} has no stripe_price_id — check shop settings ACF config`);
+        return res.status(503).send('Pull box not fully configured. Contact a mod.');
+    }
+
+    const claimed = (box.claimedSlots || []).length;
+    const remaining = box.totalSlots - claimed;
+    if (remaining <= 0) {
+        return res.status(409).send('Pull box is sold out.');
+    }
+
+    try {
+        const stripe = new Stripe(config.STRIPE_SECRET_KEY);
+        const discordUserId = req.query.user;
+
+        const lineItem = {
+            price: box.stripePriceId,
+            quantity: 1,
+            adjustable_quantity: {
+                enabled: true,
+                minimum: 1,
+                maximum: Math.min(20, remaining),
+            },
+        };
+
+        const params = {
+            mode: 'payment',
+            line_items: [lineItem],
+            allow_promotion_codes: true,
+            success_url: `${config.SHOP_URL}/thank-you?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: config.SHOP_URL,
+            metadata: {
+                source: 'pull_box',
+                pull_box_id: String(box.id),
+                tier,
+                discord_user_id: discordUserId || '',
+            },
+            custom_fields: customFieldsFor(discordUserId),
+        };
+
+        // Prefill email for linked buyers
+        if (discordUserId) {
+            const link = purchases.getEmailByDiscordId.get(discordUserId);
+            if (link) params.customer_email = link.customer_email;
+        }
+
+        const covered = discordUserId ? hasShippingCoveredByDiscordId(discordUserId) : false;
+        if (!covered) {
+            params.shipping_options = buildShippingOptions(discordUserId);
+            params.shipping_address_collection = { allowed_countries: config.SHIPPING.COUNTRIES };
+        }
+
+        const session = await stripe.checkout.sessions.create(params);
+        res.redirect(303, session.url);
+    } catch (e) {
+        console.error('Pull-box checkout error:', e.message);
+        res.status(500).send('Checkout failed. Try again or contact a mod.');
+    }
+});
+
+// =========================================================================
 // Product direct checkout — creates a Stripe session for a product by price ID
 // =========================================================================
 

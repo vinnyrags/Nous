@@ -19,7 +19,7 @@ import { updateBattleMessage } from '../commands/battle.js';
 import { clearExpiryTimer, clearListingTtl, updateListingEmbed, updateListSessionEmbed } from '../commands/card-shop.js';
 import { addRevenue } from '../community-goals.js';
 import { recordShipping } from '../shipping.js';
-import { recordPullPurchase } from '../commands/pull.js';
+import { recordPullPurchase, recordPullBoxPurchase } from '../commands/pull.js';
 import * as queueSource from '../lib/queue-source.js';
 import { createOrder } from '../shippingeasy-api.js';
 
@@ -287,8 +287,63 @@ async function handleCheckoutNotifications(session, context) {
     // Check card sale payment
     await checkCardSalePayment(session, discordUserId, lineItems);
 
+    // Check pull-box (slot-based) payment
+    await checkPullBoxPayment(session, discordUserId, customerEmail, lineItems);
+
     // Detect shipping mismatch
     await checkShippingMismatch(session, discordUserId, customerEmail);
+}
+
+/**
+ * Pull-box payments under the new slot-based system. Routes both flows:
+ *
+ *   Homepage flow: metadata.pull_box_slots is a comma-separated list of
+ *   slots that were pre-claimed at session-create time. We just confirm
+ *   them.
+ *
+ *   Discord flow: no slots in metadata. We auto-pick the lowest-numbered
+ *   open slots in the active box, claim them atomically, and confirm.
+ *
+ * In both cases the consolidated queue mirror happens once (per buy,
+ * not per slot) so the homepage Live Queue shows a single row.
+ */
+async function checkPullBoxPayment(session, discordUserId, customerEmail, lineItems = []) {
+    if (session.metadata?.source !== 'pull_box') return;
+
+    const pullBoxId = Number(session.metadata?.pull_box_id);
+    if (!pullBoxId) return;
+
+    const explicitSlotsRaw = session.metadata?.pull_box_slots || '';
+    const explicitSlots = explicitSlotsRaw
+        ? explicitSlotsRaw.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n) && n > 0)
+        : null;
+
+    const quantity = lineItems[0]?.quantity || 1;
+
+    // Resolve buyer's Discord handle (when known) so the slot rows
+    // and the queue entry both render with the friendly display label.
+    let discordHandle = null;
+    if (discordUserId) {
+        try {
+            const member = await getMember(discordUserId);
+            discordHandle = member?.user?.username || member?.user?.tag || null;
+        } catch {
+            // Member fetch failed — proceed without; serializer falls
+            // back to redacted email which is still recognizable.
+        }
+    }
+
+    await recordPullBoxPurchase({
+        stripeSessionId: session.id,
+        pullBoxId,
+        explicitSlots,
+        quantity,
+        discordUserId,
+        discordHandle,
+        customerEmail,
+    });
+
+    console.log(`Pull box #${pullBoxId} purchase: ${(explicitSlots || []).length || quantity} slot(s) for ${discordHandle || discordUserId || customerEmail}`);
 }
 
 /**
