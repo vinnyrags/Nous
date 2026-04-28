@@ -13,6 +13,7 @@ import { db } from '../db.js';
 import config from '../config.js';
 import { handleSync } from './sync.js';
 import { initCommunityGoals } from '../community-goals.js';
+import * as queueSource from '../lib/queue-source.js';
 
 // Order matters — child tables before parents (foreign key constraints)
 const TABLES_TO_CLEAR = [
@@ -108,12 +109,30 @@ async function handleReset(message) {
         ? `Cleared: ${cleared.join(', ')}`
         : 'All tables were already empty';
 
+    // Wipe the WP source-of-truth queue too — under QUEUE_SOURCE=wp the
+    // local SQLite queue tables are legacy/empty, and the homepage Live
+    // Queue + !queue commands all read from WP. Without this, !reset
+    // would leave the homepage showing the pre-reset queue.
+    let wpReset = null;
+    try {
+        wpReset = await queueSource.resetAll();
+    } catch (e) {
+        await message.channel.send({ embeds: [new EmbedBuilder()
+            .setTitle('⚠️ WP queue wipe failed')
+            .setDescription(`Local SQLite cleared, but the WP queue (sessions + entries) was not. Manual cleanup may be needed.\n\n\`${e.message}\``)
+            .setColor(0xe74c3c)] });
+    }
+
     // Refresh the #restock-tracker pinned message
     await initCommunityGoals();
 
+    const wpLine = wpReset && !wpReset.sqliteHandledExternally
+        ? `\nWP queue wiped: ${wpReset.sessionsDeleted} session(s), ${wpReset.entriesDeleted} entry/entries.`
+        : '';
+
     await message.channel.send({ embeds: [new EmbedBuilder()
         .setTitle('✅ Database Wiped')
-        .setDescription(`${summary}\n\nCommunity goals reset to cycle 1, $0. Restock tracker updated.`)
+        .setDescription(`${summary}\n${wpLine}\nCommunity goals reset to cycle 1, $0. Restock tracker updated.`)
         .setColor(0xceff00)] });
 
     // Step 2: Sync products to restore stock
