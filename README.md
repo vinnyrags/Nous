@@ -40,6 +40,14 @@ Key variables:
 - `SHOP_URL`, `SITE_URL`, `LIVESTREAM_SECRET` — public URLs and livestream toggle secret
 - `QUEUE_SOURCE` — `sqlite` (default, legacy local tables) or `wp` (WordPress as source of truth via `/shop/v1/queue/*`). Switch after running `scripts/migrate-queue-to-wp.js` and validating in staging — see [Queue cutover](#queue-cutover)
 
+### Queue commands (during livestream)
+
+- `!queue` — show the current queue
+- `!queue open` / `!queue close` — open/close (mods only; usually automated by `!live` / `!offline`)
+- `!queue history` — last five queues
+- **`!queue next`** — advance the queue: completes the current "Now Serving" entry and promotes the oldest queued entry to active. The itzenzo.tv homepage's Live Queue section renders the active entry as a highlighted block, so this command is what keeps the public site in sync with what you're actually doing on stream. Mods only. (Requires `QUEUE_SOURCE=wp` — the legacy SQLite path doesn't track entry status.)
+- `!duckrace` / `!duckrace start` / `!duckrace winner @user` — duck race roster + animation
+
 ## Structure
 
 | Path | Purpose |

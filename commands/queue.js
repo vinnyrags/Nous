@@ -42,9 +42,67 @@ async function handleQueue(message, args) {
             return closeQueue(message);
         case 'history':
             return queueHistory(message);
+        case 'next':
+            if (!isAdmin) return message.reply('Only moderators can advance the queue.');
+            return advanceQueue(message);
         default:
             return showQueue(message);
     }
+}
+
+/**
+ * Advance the queue: complete the current active entry (if any) and
+ * promote the oldest queued entry to active. The homepage Live Queue
+ * section already renders status='active' as a highlighted "NOW SERVING"
+ * block, so this command is the bridge between "we're working through
+ * the queue on stream" and "the website reflects what's happening."
+ */
+async function advanceQueue(message) {
+    const queue = await queueSource.getActiveQueue();
+    if (!queue) {
+        return message.reply('No open queue.');
+    }
+
+    const current = await queueSource.getActiveEntry(queue.id);
+    if (current) {
+        await queueSource.updateEntry(current.id, { status: 'completed' });
+    }
+
+    const next = await queueSource.getNextQueuedEntry(queue.id);
+    if (!next) {
+        await updateQueueChannelEmbed(queue.id);
+        const completedNote = current
+            ? `Completed ${formatEntryLabel(current)}. No more queued entries — queue is empty.`
+            : 'Queue is empty — nothing to advance to.';
+        return message.reply(completedNote);
+    }
+
+    await queueSource.updateEntry(next.id, { status: 'active' });
+    await updateQueueChannelEmbed(queue.id);
+
+    const embed = new EmbedBuilder()
+        .setTitle('▶️ Now Serving')
+        .setDescription(
+            (current ? `✅ Completed: ${formatEntryLabel(current)}\n\n` : '') +
+            `**Now serving:** ${formatEntryLabel(next)}`,
+        )
+        .setColor(0xceff00)
+        .setFooter({ text: `Queue #${queue.id}` });
+
+    await message.channel.send({ embeds: [embed] });
+}
+
+/**
+ * Render an entry as a one-line label for Discord embed text. Prefers
+ * Discord mentions when we have a numeric snowflake; falls back to
+ * handle, email, or "Guest".
+ */
+function formatEntryLabel(entry) {
+    const buyer = entry.discord_user_id && /^\d+$/.test(entry.discord_user_id)
+        ? `<@${entry.discord_user_id}>`
+        : (entry.discord_handle ? `@${entry.discord_handle}` : (entry.customer_email || 'Guest'));
+    const product = entry.product_name || entry.detail_label || 'Entry';
+    return `${buyer} — ${product}`;
 }
 
 async function openQueue(message) {
