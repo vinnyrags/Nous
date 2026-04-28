@@ -238,15 +238,24 @@ async function handleCheckoutNotifications(session, context) {
         }
     }
 
-    // Add to queue (skip battles and individual card sales)
-    if (session.metadata?.source !== 'pack-battle' && session.metadata?.source !== 'card-sale') {
-        for (const item of lineItems) {
-            const productName = item.name || 'Unknown Product';
-            const quantity = item.quantity || 1;
-            const added = await addToQueue(discordUserId, customerEmail, productName, quantity, session.id);
-            if (added) {
-                console.log(`Queue entry: ${productName} (×${quantity}) for ${discordUserId || customerEmail}`);
-            }
+    // Add to queue (skip battles and individual card sales). One purchase
+    // becomes ONE consolidated queue entry — line items roll up into a
+    // single "Nx Item, Mx Item" label so multi-item orders show as a
+    // single row everywhere (homepage Live Queue + Discord embed).
+    if (session.metadata?.source !== 'pack-battle' && session.metadata?.source !== 'card-sale' && lineItems.length > 0) {
+        const items = lineItems.map((item) => ({
+            name: item.name || 'Unknown Product',
+            quantity: item.quantity || 1,
+        }));
+        const added = await addToQueue({
+            discordUserId,
+            customerEmail,
+            items,
+            stripeSessionId: session.id,
+        });
+        if (added) {
+            const summary = items.map((i) => `${i.quantity}x ${i.name}`).join(', ');
+            console.log(`Queue entry: ${summary} for ${discordUserId || customerEmail}`);
         }
     }
 

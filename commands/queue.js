@@ -487,7 +487,12 @@ function buildQueueDescription(entries, uniqueBuyers) {
         const label = key === 'Unknown' ? key : /^\d+$/.test(key) ? `<@${key}>` : key;
         const productLabel = entry.product_name || entry.detail_label || 'Entry';
         const qty = entry.quantity || 1;
-        const product = `${productLabel}${qty > 1 ? ` ×${qty}` : ''}`;
+        // Consolidated multi-item labels (e.g. "4x Booster Pack, 1x Box")
+        // already encode their own quantities — don't append a redundant ×N.
+        const looksConsolidated = productLabel.includes(',') || /\d+x /i.test(productLabel);
+        const product = looksConsolidated || qty <= 1
+            ? productLabel
+            : `${productLabel} ×${qty}`;
         return `${i + 1}. ${label} — ${product}`;
     });
 
@@ -518,23 +523,44 @@ function buildQueueEmbed(queue, entries, uniqueBuyers, status) {
 }
 
 /**
- * Add a purchase to the active queue (called from Stripe webhook).
- * Returns true if added, false if no active queue.
+ * Add a purchase to the active queue as a single consolidated entry
+ * (called from Stripe webhook). One purchase → one queue entry, with
+ * the line items rolled into a "4x Booster Pack, 1x Box" label so
+ * multi-item orders don't fan out into multiple rows on the homepage
+ * and the Discord embed.
+ *
+ * `items` is an array of `{ name, quantity }`. Returns true if added,
+ * false if no active queue.
  */
-async function addToQueue(discordUserId, customerEmail, productName, quantity, stripeSessionId) {
+async function addToQueue({ discordUserId, customerEmail, items, stripeSessionId }) {
     const active = await queueSource.getActiveQueue();
     if (!active) return false;
+    if (!Array.isArray(items) || items.length === 0) return false;
+
+    const normalized = items.map((item) => ({
+        name: item.name || 'Unknown Product',
+        quantity: item.quantity || 1,
+    }));
+    const totalQuantity = normalized.reduce((sum, item) => sum + item.quantity, 0);
+    // Single-item single-qty stays as just the name so existing displays
+    // and tests don't need to learn the "Nx" prefix for the trivial case.
+    // Multi-item or qty>1 entries get the "Nx Item, Mx Item" format.
+    const detailLabel = normalized.length === 1 && normalized[0].quantity === 1
+        ? normalized[0].name
+        : normalized.map((item) => `${item.quantity}x ${item.name}`).join(', ');
 
     await queueSource.addEntry({
         queueId: active.id,
         discordUserId,
         customerEmail,
-        productName,
-        quantity,
+        productName: detailLabel,
+        quantity: totalQuantity,
         stripeSessionId,
         type: 'order',
         source: 'shop',
         externalRef: stripeSessionId ? `stripe:${stripeSessionId}` : null,
+        detailLabel,
+        detailData: { items: normalized, totalQuantity },
     });
 
     // Update the real-time #queue channel embed

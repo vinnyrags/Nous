@@ -245,9 +245,10 @@ describe('full card night critical path', () => {
             ],
         }));
 
-        // Verify queue has entries from pre-orders
+        // Verify queue has entries from pre-orders — one consolidated
+        // entry per checkout (alice's 1 item + bob's 2 items = 2 entries)
         let entries = stmts.queues.getEntries.all(queue.id);
-        expect(entries).toHaveLength(3); // 1 + 2 items
+        expect(entries).toHaveLength(2);
         let uniqueBuyers = stmts.queues.getUniqueBuyers.all(queue.id);
         expect(uniqueBuyers).toHaveLength(2); // alice + bob
 
@@ -302,9 +303,10 @@ describe('full card night critical path', () => {
             live: true,
         }));
 
-        // Queue now has pre-order + live entries
+        // Queue now has pre-order + live entries — one consolidated
+        // entry per checkout (2 pre-order + 2 live = 4 entries)
         entries = stmts.queues.getEntries.all(queue.id);
-        expect(entries).toHaveLength(5); // 3 pre-order + 2 live
+        expect(entries).toHaveLength(4);
         uniqueBuyers = stmts.queues.getUniqueBuyers.all(queue.id);
         expect(uniqueBuyers).toHaveLength(3); // alice, bob, charlie
 
@@ -476,7 +478,12 @@ describe('manual mid-stream queue close', () => {
         const session = stmts.livestream.getActiveSession.get();
 
         // Pre-order arrives
-        await addToQueue('alice_discord', 'alice@example.com', 'Pack A', 1, 'cs_pre');
+        await addToQueue({
+            discordUserId: 'alice_discord',
+            customerEmail: 'alice@example.com',
+            items: [{ name: 'Pack A', quantity: 1 }],
+            stripeSessionId: 'cs_pre',
+        });
 
         expect(stmts.queues.getEntries.all(queue.id)).toHaveLength(1);
 
@@ -488,7 +495,12 @@ describe('manual mid-stream queue close', () => {
         expect(stmts.queues.getQueueById.get(queue.id).status).toBe('closed');
 
         // ── Purchases during closed queue are silently dropped ──────
-        const added = await addToQueue('bob_discord', 'bob@example.com', 'Pack B', 1, 'cs_dropped');
+        const added = await addToQueue({
+            discordUserId: 'bob_discord',
+            customerEmail: 'bob@example.com',
+            items: [{ name: 'Pack B', quantity: 1 }],
+            stripeSessionId: 'cs_dropped',
+        });
         expect(added).toBe(false);
 
         // ── Offline still works cleanly ─────────────────────────────
@@ -527,7 +539,12 @@ describe('manual mid-stream queue close', () => {
         expect(secondQueue.id).not.toBe(firstQueue.id);
 
         // New orders go into the new queue
-        const added = await addToQueue('charlie', 'c@e.com', 'Card', 1, 'cs_new');
+        const added = await addToQueue({
+            discordUserId: 'charlie',
+            customerEmail: 'c@e.com',
+            items: [{ name: 'Card', quantity: 1 }],
+            stripeSessionId: 'cs_new',
+        });
         expect(added).toBe(true);
         expect(stmts.queues.getEntries.all(secondQueue.id)).toHaveLength(1);
         expect(stmts.queues.getEntries.all(firstQueue.id)).toHaveLength(0);
@@ -573,7 +590,7 @@ describe('stripe webhook integration during livestream', () => {
         expect(allQueues).toHaveLength(0);
     });
 
-    it('multi-item purchase creates multiple queue entries but one duck race entry', async () => {
+    it('multi-item purchase consolidates into one queue entry with comma-separated label', async () => {
         stmts.queues.createQueue.run();
         const queue = stmts.queues.getActiveQueue.get();
 
@@ -589,7 +606,11 @@ describe('stripe webhook integration during livestream', () => {
         }));
 
         const entries = stmts.queues.getEntries.all(queue.id);
-        expect(entries).toHaveLength(3); // one entry per line item
+        // One purchase = one queue entry, regardless of line item count
+        expect(entries).toHaveLength(1);
+        expect(entries[0].product_name).toBe('1x ETB, 1x Booster Box, 3x Elite Trainer');
+        // quantity sums all line items (1 + 1 + 3 = 5) for analytics
+        expect(entries[0].quantity).toBe(5);
 
         const uniqueBuyers = stmts.queues.getUniqueBuyers.all(queue.id);
         expect(uniqueBuyers).toHaveLength(1); // one duck race entry
