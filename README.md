@@ -45,7 +45,8 @@ Key variables:
 - `!queue` — show the current queue
 - `!queue open` / `!queue close` — open/close (mods only; usually automated by `!live` / `!offline`)
 - `!queue history` — last five queues
-- **`!queue next`** — advance the queue: completes the current "Now Serving" entry and promotes the oldest queued entry to active. The itzenzo.tv homepage's Live Queue section renders the active entry as a highlighted block, so this command is what keeps the public site in sync with what you're actually doing on stream. Mods only. (Requires `QUEUE_SOURCE=wp` — the legacy SQLite path doesn't track entry status.)
+- **`!queue next`** — advance the queue: completes the current "Now Serving" entry and promotes the oldest queued entry to active. Completed entries appear in the "Already opened" timeline above the active block on the homepage. Mods only. (Requires `QUEUE_SOURCE=wp` — the legacy SQLite path doesn't track entry status.)
+- **`!queue skip <position>`** — god-mode jump to any entry by homepage position (1-based). Position 1 is the active entry, positions 2+ are queued in oldest-first order. The previous active goes back to queued (not completed) so nothing is lost. Mods only.
 - `!duckrace` / `!duckrace start` / `!duckrace winner @user` — duck race roster + animation
 
 ## Structure

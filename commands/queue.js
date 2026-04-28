@@ -45,9 +45,67 @@ async function handleQueue(message, args) {
         case 'next':
             if (!isAdmin) return message.reply('Only moderators can advance the queue.');
             return advanceQueue(message);
+        case 'skip':
+            if (!isAdmin) return message.reply('Only moderators can skip the queue.');
+            return skipQueueTo(message, args.slice(1));
         default:
             return showQueue(message);
     }
+}
+
+/**
+ * Jump to any entry by its homepage position number — god-mode control
+ * for working through the queue out-of-order. Position 1 is the active
+ * entry (or the first queued entry if nothing is active); positions 2+
+ * are the queued entries in oldest-first order.
+ *
+ * The previous active entry (if any) is sent back to "queued" rather
+ * than "completed" — skipping is a navigation, not a completion.
+ * Use `!queue next` to mark the served entry as actually done.
+ */
+async function skipQueueTo(message, args) {
+    const targetPosition = parseInt(args[0], 10);
+    if (!Number.isFinite(targetPosition) || targetPosition < 1) {
+        return message.reply('Usage: `!queue skip <position>` — e.g. `!queue skip 5` to jump to entry #5.');
+    }
+
+    const queue = await queueSource.getActiveQueue();
+    if (!queue) {
+        return message.reply('No open queue.');
+    }
+
+    const current = await queueSource.getActiveEntry(queue.id);
+    const queued = await queueSource.getQueuedEntries(queue.id);
+
+    // Build the position-ordered list: [active?, ...queued]
+    const positions = current ? [current, ...queued] : queued;
+    const target = positions[targetPosition - 1];
+
+    if (!target) {
+        return message.reply(`No entry at position ${targetPosition} (queue has ${positions.length} entries).`);
+    }
+    if (current && target.id === current.id) {
+        return message.reply(`Entry #${targetPosition} (${formatEntryLabel(target)}) is already active.`);
+    }
+
+    // Demote current active back to queued so it's not lost
+    if (current) {
+        await queueSource.updateEntry(current.id, { status: 'queued' });
+    }
+    // Promote target to active
+    await queueSource.updateEntry(target.id, { status: 'active' });
+    await updateQueueChannelEmbed(queue.id);
+
+    const embed = new EmbedBuilder()
+        .setTitle(`⏭️ Skipped to Entry #${targetPosition}`)
+        .setDescription(
+            (current ? `↩️ Returned to queue: ${formatEntryLabel(current)}\n\n` : '') +
+            `**Now serving:** ${formatEntryLabel(target)}`,
+        )
+        .setColor(0xceff00)
+        .setFooter({ text: `Queue #${queue.id} • Use \`!queue next\` to mark complete when done.` });
+
+    await message.channel.send({ embeds: [embed] });
 }
 
 /**
