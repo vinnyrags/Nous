@@ -39,6 +39,7 @@ Key variables:
 - `BOT_PORT` — Express webhook server port (default 3100)
 - `SHOP_URL`, `SITE_URL`, `LIVESTREAM_SECRET` — public URLs and livestream toggle secret
 - `QUEUE_SOURCE` — `sqlite` (default, legacy local tables) or `wp` (WordPress as source of truth via `/shop/v1/queue/*`). Switch after running `scripts/migrate-queue-to-wp.js` and validating in staging — see [Queue cutover](#queue-cutover)
+- `STRIPE_DELETE_WHEN_REMOVING` — `true` (default) deletes Stripe products on `push-products.js --clean` / `push-cards.js --clean` so archived rows don't accumulate and silently break checkouts. Set to `false` before going live so prices with payment history aren't blocked from delete (Stripe rejects deleting anything with charges; the script falls back to archive automatically when it has to)
 
 ### Queue commands (during livestream)
 
@@ -98,7 +99,42 @@ Homepage buyers pick specific slots via a modal grid. Discord buyers get a modal
 | `scripts/shop/discord-security.js` | Security lockdown helpers |
 | `scripts/shop/discord-migrate.js` | Bulk Discord structure migrations |
 | `scripts/shop/create-test-products.js` | Seed test products in Stripe |
+| `scripts/shop/audit-stripe-active.js` | Find WP catalog posts that reference inactive (archived/deleted) Stripe products. `--apply` sets stock=0 + clears stale `stripe_price_id`/`stripe_product_id` meta. `--local` skips the SSH wrap when the script runs on the box itself. Belt for the pre-flight + webhook layers; useful as a nightly cron. |
 | `scripts/migrate-queue-to-wp.js` | One-shot migration of recent SQLite queues into the WordPress unified queue (`--limit=N`, `--dry-run`). Idempotent via external_ref. |
+
+## Catalog drift defense (Stripe ↔ WP)
+
+A buyer adding an item whose `stripe_product_id` points at a Stripe
+product that has since been archived or deleted will hit a checkout
+failure: Stripe refuses to create a session if any line item references
+an inactive product. To prevent that, the system layers four pieces:
+
+1. **Push scripts delete instead of archive** — `push-products.js
+   --clean` and `push-cards.js --clean` hard-delete Stripe products
+   (env-gated by `STRIPE_DELETE_WHEN_REMOVING`) so re-syncs don't leave
+   archived rows for catalog references to point at later. Falls back
+   to archive automatically when Stripe rejects delete (live mode +
+   payment history).
+2. **Stripe webhook → real-time WP cleanup** — `server.js` handles
+   `product.updated` (active true→false), `product.deleted`,
+   `price.updated`, and `price.deleted` events. Each calls
+   `notifyCatalogProductDeactivated()` which POSTs to WP's
+   `/shop/v1/catalog/stripe-product-deactivated` endpoint. WP sets
+   `stock_quantity=0` on every catalog post that references the now-dead
+   `stripe_product_id` and clears the stale meta. **Requires the four
+   events to be subscribed on the Stripe webhook endpoint** (Dashboard →
+   Developers → Webhooks → your endpoint → Add events).
+3. **Pre-flight in CreateCheckoutEndpoint** — checkout asks Stripe
+   directly whether each priceId is active before decrementing stock or
+   creating a session. Backstop for any window between (1) and (2).
+4. **Friendly catch in CreateCheckoutEndpoint** — if Stripe still rejects
+   the session create call, the catch block parses the offending priceId
+   out of the message, sets stock=0, and returns a 409 naming the bad
+   item ("Mewtwo #XY101 is no longer available — please remove…").
+
+`scripts/shop/audit-stripe-active.js` is a manual sweep that catches
+anything (1)–(4) miss. Run periodically (cron candidate — see
+vincentragosta.io's `TODO.md`).
 
 ## Queue cutover
 

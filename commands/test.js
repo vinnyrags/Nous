@@ -240,6 +240,29 @@ async function runCardNightFlow(testChannel) {
         }
     }));
 
+    // Sanity-check the catalog drift cleanup endpoint — if this is broken
+    // when Stripe archives a product, the homepage will keep showing the
+    // stale item and break checkouts. Use a deliberately-fake product ID
+    // so we exercise the auth + matched=0 path without mutating any real
+    // catalog row.
+    results.push(await step('Catalog drift cleanup endpoint reachable', async () => {
+        const res = await fetch(`${config.SITE_URL}/wp-json/shop/v1/catalog/stripe-product-deactivated`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Bot-Secret': config.LIVESTREAM_SECRET,
+            },
+            body: JSON.stringify({ stripeProductId: 'prod_test_probe_does_not_exist' }),
+        });
+        if (res.status !== 200) {
+            throw new Error(`catalog/stripe-product-deactivated returned ${res.status}`);
+        }
+        const data = await res.json();
+        if (data.matched !== 0) {
+            throw new Error(`expected matched=0 for fake productId, got ${data.matched}`);
+        }
+    }));
+
     // --- PRE-STREAM ---
     // Find a real product from Stripe for hype/battle
     let realProductName = 'Prismatic Evolutions Booster Box'; // fallback
