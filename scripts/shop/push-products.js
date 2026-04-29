@@ -42,10 +42,43 @@ const SHEET_OVERRIDE = args.find((a) => a.startsWith('--sheet='));
 const ACTIVE_SHEET = SHEET_OVERRIDE ? SHEET_OVERRIDE.split('=')[1] : SHEET_NAME;
 
 /**
- * Deactivate all existing Stripe products.
+ * Remove all existing Stripe products.
+ *
+ * In test mode (sk_test_…) we hard-delete prices+products so they vanish
+ * from Stripe entirely — archived rows that linger get referenced by
+ * cards in WordPress and silently kill checkout sessions weeks later.
+ * Set STRIPE_DELETE_WHEN_REMOVING=false to fall back to the old archive
+ * behavior (mandatory for live mode where Stripe blocks deletion of
+ * anything with payment history).
  */
+const DELETE_WHEN_REMOVING = (process.env.STRIPE_DELETE_WHEN_REMOVING ?? 'true').toLowerCase() !== 'false';
+
+async function removeProduct(product) {
+    if (!DELETE_WHEN_REMOVING) {
+        await stripe.products.update(product.id, { active: false });
+        return 'archived';
+    }
+
+    // Stripe forbids deleting a product while any active price still
+    // references it — archive the prices first, then attempt delete.
+    try {
+        const prices = await stripe.prices.list({ product: product.id, limit: 100 });
+        for (const price of prices.data) {
+            try { await stripe.prices.update(price.id, { active: false }); } catch { /* best-effort */ }
+        }
+        await stripe.products.del(product.id);
+        return 'deleted';
+    } catch (e) {
+        // Likely test/live mode mismatch or payment history blocking
+        // delete (Stripe returns 400 with "cannot be deleted"). Falling
+        // back to archive keeps the script idempotent.
+        await stripe.products.update(product.id, { active: false });
+        return `archived (delete refused: ${e.message})`;
+    }
+}
+
 async function cleanProducts() {
-    console.log('Cleaning: deactivating all existing Stripe products...');
+    console.log(`Cleaning: removing all existing Stripe products (mode=${DELETE_WHEN_REMOVING ? 'delete' : 'archive'})...`);
     let hasMore = true;
     let startingAfter = null;
     let count = 0;
@@ -57,8 +90,8 @@ async function cleanProducts() {
         const products = await stripe.products.list(params);
 
         for (const product of products.data) {
-            await stripe.products.update(product.id, { active: false });
-            console.log(`  Deactivated: ${product.name}`);
+            const action = await removeProduct(product);
+            console.log(`  ${action}: ${product.name}`);
             count++;
             startingAfter = product.id;
         }
@@ -66,7 +99,7 @@ async function cleanProducts() {
         hasMore = products.has_more;
     }
 
-    console.log(`  ${count} product(s) deactivated.\n`);
+    console.log(`  ${count} product(s) removed.\n`);
 }
 
 async function main() {

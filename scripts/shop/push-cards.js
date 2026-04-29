@@ -78,8 +78,41 @@ function priceToCents(raw) {
     return Math.round(dollars * 100);
 }
 
+/**
+ * In test mode (sk_test_…) hard-delete prices+products so they vanish
+ * from Stripe entirely — archived rows that linger get referenced by
+ * cards in WordPress and silently kill checkout sessions weeks later.
+ * Set STRIPE_DELETE_WHEN_REMOVING=false to fall back to the old archive
+ * behavior (mandatory for live mode where Stripe blocks deletion of
+ * anything with payment history).
+ */
+const DELETE_WHEN_REMOVING = (process.env.STRIPE_DELETE_WHEN_REMOVING ?? 'true').toLowerCase() !== 'false';
+
+async function removeProduct(product) {
+    if (!DELETE_WHEN_REMOVING) {
+        await stripe.products.update(product.id, { active: false });
+        return 'archived';
+    }
+
+    // Stripe forbids deleting a product while any active price still
+    // references it — archive the prices first, then attempt delete.
+    try {
+        const prices = await stripe.prices.list({ product: product.id, limit: 100 });
+        for (const price of prices.data) {
+            try { await stripe.prices.update(price.id, { active: false }); } catch { /* best-effort */ }
+        }
+        await stripe.products.del(product.id);
+        return 'deleted';
+    } catch (e) {
+        // Likely test/live mode mismatch or payment history blocking
+        // delete. Falling back to archive keeps the script idempotent.
+        await stripe.products.update(product.id, { active: false });
+        return `archived (delete refused: ${e.message})`;
+    }
+}
+
 async function cleanCardProducts() {
-    console.log('Cleaning: deactivating all existing Stripe card products...');
+    console.log(`Cleaning: removing all existing Stripe card products (mode=${DELETE_WHEN_REMOVING ? 'delete' : 'archive'})...`);
     let hasMore = true;
     let startingAfter = null;
     let count = 0;
@@ -92,8 +125,8 @@ async function cleanCardProducts() {
 
         for (const product of products.data) {
             if ((product.metadata || {}).type === 'card') {
-                if (!DRY_RUN) await stripe.products.update(product.id, { active: false });
-                console.log(`  Deactivated: ${product.name}`);
+                const action = DRY_RUN ? 'would-remove (dry-run)' : await removeProduct(product);
+                console.log(`  ${action}: ${product.name}`);
                 count++;
             }
             startingAfter = product.id;
@@ -102,7 +135,7 @@ async function cleanCardProducts() {
         hasMore = products.has_more;
     }
 
-    console.log(`  ${count} card(s) deactivated.\n`);
+    console.log(`  ${count} card(s) removed.\n`);
 }
 
 async function main() {
