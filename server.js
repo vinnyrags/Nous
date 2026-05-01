@@ -20,6 +20,7 @@ import {
     notifyCatalogProductDeactivated,
     priceEventProductId,
 } from './webhooks/stripe.js';
+import { propagateRefund } from './lib/refund-propagator.js';
 import { handleTwitchWebhook } from './webhooks/twitch.js';
 import { handleShippingEasyWebhook } from './webhooks/shippingeasy.js';
 import { handleCardRequestCritical, handleCardRequestNotifications } from './webhooks/card-request.js';
@@ -142,6 +143,37 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
                 }
                 return;
             }
+            // Refund triggered from the Stripe Dashboard / API. The event
+            // carries a charge object with the payment_intent; we map back
+            // to the originating checkout session by looking it up against
+            // the payment_intent. 200 first, then propagate fire-and-forget.
+            case 'charge.refunded': {
+                const charge = event.data.object;
+                res.sendStatus(200);
+                handleRefundEvent(charge, 'webhook_refund').catch(e =>
+                    console.error('refund propagation error:', e.message)
+                );
+                return;
+            }
+            // Dispute opened — funds may already be withheld by Stripe. Treat
+            // like a refund for queue / shipping purposes; do NOT DM the buyer.
+            case 'charge.dispute.created': {
+                const dispute = event.data.object;
+                res.sendStatus(200);
+                handleDisputeEvent(dispute).catch(e =>
+                    console.error('dispute propagation error:', e.message)
+                );
+                return;
+            }
+            // Dispute closed — outcome carried in `status`. Refund-the-buyer
+            // outcomes (`lost`) are propagation no-ops because the charge
+            // is already refunded; merchant-won outcomes don't trigger anything.
+            case 'charge.dispute.closed': {
+                const dispute = event.data.object;
+                res.sendStatus(200);
+                console.log(`charge.dispute.closed status=${dispute.status} for charge=${dispute.charge}`);
+                return;
+            }
             default:
                 console.log('Unhandled Stripe event:', event.type);
         }
@@ -151,6 +183,65 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
 
     res.sendStatus(200);
 });
+
+/**
+ * Resolve a Stripe charge → checkout session id by querying the sessions
+ * list with payment_intent. Returns null when no matching session exists
+ * (charge could be from a non-checkout flow — payment links, invoices —
+ * we only care about checkout-session-driven purchases).
+ */
+async function chargeSessionId(charge) {
+    const stripe = new Stripe(config.STRIPE_SECRET_KEY);
+    const paymentIntentId = typeof charge.payment_intent === 'string'
+        ? charge.payment_intent
+        : charge.payment_intent?.id;
+    if (!paymentIntentId) return null;
+    try {
+        const list = await stripe.checkout.sessions.list({ payment_intent: paymentIntentId, limit: 1 });
+        return list.data?.[0]?.id || null;
+    } catch (e) {
+        console.error(`Could not resolve session for payment_intent ${paymentIntentId}:`, e.message);
+        return null;
+    }
+}
+
+async function handleRefundEvent(charge, source) {
+    const sessionId = await chargeSessionId(charge);
+    if (!sessionId) {
+        console.log(`refund: no checkout session for charge ${charge.id} — ignoring`);
+        return;
+    }
+    const totalRefunded = charge.amount_refunded || 0;
+    const isFull = totalRefunded >= charge.amount;
+    await propagateRefund(sessionId, {
+        source,
+        amountCents: isFull ? null : totalRefunded,
+        reason: charge.refunds?.data?.[0]?.reason || null,
+        refundId: charge.refunds?.data?.[0]?.id || null,
+    });
+}
+
+async function handleDisputeEvent(dispute) {
+    const stripe = new Stripe(config.STRIPE_SECRET_KEY);
+    let charge = null;
+    try {
+        charge = await stripe.charges.retrieve(typeof dispute.charge === 'string' ? dispute.charge : dispute.charge.id);
+    } catch (e) {
+        console.error(`Could not retrieve charge ${dispute.charge} for dispute:`, e.message);
+        return;
+    }
+    const sessionId = await chargeSessionId(charge);
+    if (!sessionId) {
+        console.log(`dispute: no checkout session for charge ${charge.id} — ignoring`);
+        return;
+    }
+    await propagateRefund(sessionId, {
+        source: 'webhook_dispute',
+        amountCents: dispute.amount || charge.amount,
+        reason: `Dispute ${dispute.reason || 'unknown'} — ${dispute.status}`,
+        refundId: dispute.id,
+    });
+}
 
 // =========================================================================
 // Twitch webhook — needs raw body for signature verification

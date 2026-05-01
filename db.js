@@ -313,6 +313,22 @@ try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_country TEXT DEFAULT NU
 try { db.exec(`ALTER TABLE purchases ADD COLUMN shippingeasy_order_id TEXT DEFAULT NULL`); } catch { /* exists */ }
 try { db.exec(`ALTER TABLE purchases ADD COLUMN shippingeasy_canceled_at TEXT DEFAULT NULL`); } catch { /* exists */ }
 
+// Refund tracking (v13) — set when a Stripe refund or dispute closes against this session.
+// Captured here so the unified refund propagator (lib/refund-propagator.js) has a single
+// idempotency point and the audit trail lives next to the purchase row.
+try { db.exec(`ALTER TABLE purchases ADD COLUMN refunded_at TEXT DEFAULT NULL`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE purchases ADD COLUMN refund_amount INTEGER DEFAULT NULL`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE purchases ADD COLUMN refund_reason TEXT DEFAULT NULL`); } catch { /* exists */ }
+
+// Stripe webhook idempotency (v14) — dedupe by event.id so a Stripe retry of the same
+// event never re-applies side effects. Pruned daily by a cleanup cron.
+db.exec(`
+    CREATE TABLE IF NOT EXISTS processed_stripe_events (
+        event_id TEXT PRIMARY KEY,
+        received_at TEXT DEFAULT (datetime('now'))
+    );
+`);
+
 // =========================================================================
 // Purchases
 // =========================================================================
@@ -381,6 +397,32 @@ const stmts = {
 
     markShippingEasyCanceled: db.prepare(`
         UPDATE purchases SET shippingeasy_canceled_at = datetime('now') WHERE stripe_session_id = ?
+    `),
+
+    /**
+     * Mark every purchases row for a Stripe session as refunded. A multi-line
+     * order produces N rows sharing one stripe_session_id, so this is a bulk
+     * update by design. Idempotent — re-running keeps the original
+     * refunded_at; refund_amount tracks the cumulative refund (latest wins on
+     * the off-chance of a partial-then-full sequence).
+     */
+    markRefunded: db.prepare(`
+        UPDATE purchases
+        SET refunded_at = COALESCE(refunded_at, datetime('now')),
+            refund_amount = ?,
+            refund_reason = ?
+        WHERE stripe_session_id = ?
+    `),
+
+    decrementPurchaseCountBySession: db.prepare(`
+        UPDATE purchase_counts
+        SET total_purchases = MAX(0, total_purchases - (
+            SELECT COUNT(*) FROM purchases
+            WHERE stripe_session_id = ? AND discord_user_id = purchase_counts.discord_user_id
+        ))
+        WHERE discord_user_id = (
+            SELECT discord_user_id FROM purchases WHERE stripe_session_id = ? LIMIT 1
+        )
     `),
 
     getPendingShipments: db.prepare(`
@@ -992,6 +1034,16 @@ const lfgStmts = {
     setMessageId: db.prepare('UPDATE lfg_config SET channel_message_id = ? WHERE id = 1'),
 };
 
+const stripeEventStmts = {
+    /**
+     * Returns true on the FIRST attempt to process this event id, false
+     * on any retry (Stripe re-delivers on non-2xx or timeout). Use as the
+     * very first guard inside the express webhook handler.
+     */
+    claimEvent: db.prepare(`INSERT OR IGNORE INTO processed_stripe_events (event_id) VALUES (?)`),
+    pruneOlderThan: db.prepare(`DELETE FROM processed_stripe_events WHERE received_at < datetime('now', ?)`),
+};
+
 export {
     db,
     stmts as purchases,
@@ -1012,4 +1064,5 @@ export {
     lfgStmts as lfg,
     pullEntryStmts as pullEntries,
     trackingStmts as tracking,
+    stripeEventStmts as stripeEvents,
 };

@@ -25,7 +25,15 @@ export function createTestDb() {
             shipping_postal_code TEXT DEFAULT NULL,
             shipping_country TEXT DEFAULT NULL,
             shippingeasy_order_id TEXT DEFAULT NULL,
-            shippingeasy_canceled_at TEXT DEFAULT NULL
+            shippingeasy_canceled_at TEXT DEFAULT NULL,
+            refunded_at TEXT DEFAULT NULL,
+            refund_amount INTEGER DEFAULT NULL,
+            refund_reason TEXT DEFAULT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS processed_stripe_events (
+            event_id TEXT PRIMARY KEY,
+            received_at TEXT DEFAULT (datetime('now'))
         );
 
         CREATE TABLE IF NOT EXISTS purchase_counts (
@@ -258,6 +266,8 @@ export function buildStmts(db) {
             getPendingShipments: db.prepare(`SELECT p.* FROM purchases p WHERE p.shippingeasy_order_id IS NOT NULL AND p.shipped_at IS NULL AND p.shippingeasy_canceled_at IS NULL AND p.shipping_address IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tracking t WHERE t.customer_email = p.customer_email AND t.created_at >= p.created_at)`),
             getReadyShipments: db.prepare(`SELECT p.*, t.tracking_number, t.carrier, t.tracking_url FROM purchases p JOIN tracking t ON t.customer_email = p.customer_email AND t.created_at >= p.created_at WHERE p.shippingeasy_order_id IS NOT NULL AND p.shipped_at IS NULL AND p.shippingeasy_canceled_at IS NULL`),
             getShipmentsByDiscordId: db.prepare(`SELECT p.*, t.tracking_number, t.carrier, t.tracking_url FROM purchases p LEFT JOIN tracking t ON t.customer_email = p.customer_email AND t.created_at >= p.created_at WHERE p.discord_user_id = ? AND p.shipping_address IS NOT NULL ORDER BY p.created_at DESC LIMIT 10`),
+            markRefunded: db.prepare(`UPDATE purchases SET refunded_at = COALESCE(refunded_at, datetime('now')), refund_amount = ?, refund_reason = ? WHERE stripe_session_id = ?`),
+            decrementPurchaseCountBySession: db.prepare(`UPDATE purchase_counts SET total_purchases = MAX(0, total_purchases - (SELECT COUNT(*) FROM purchases WHERE stripe_session_id = ? AND discord_user_id = purchase_counts.discord_user_id)) WHERE discord_user_id = (SELECT discord_user_id FROM purchases WHERE stripe_session_id = ? LIMIT 1)`),
         },
         battles: {
             getNextBattleNumber: db.prepare(`SELECT COALESCE(MAX(battle_number), 0) + 1 as next FROM battles WHERE battle_number IS NOT NULL`),
