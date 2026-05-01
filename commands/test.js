@@ -17,6 +17,7 @@ import Stripe from 'stripe';
 import config from '../config.js';
 import { db, purchases, cardListings, listSessions, battles, giveaways, discordLinks, goals, tracking } from '../db.js';
 import * as queueSource from '../lib/queue-source.js';
+import * as wpPullBox from '../lib/wp-pull-box.js';
 import { client, getChannel, setChannelOverride, clearChannelOverrides, getMember } from '../discord.js';
 import { handleSell, handleList, handleSold } from './card-shop.js';
 import { handlePull } from './pull.js';
@@ -187,6 +188,34 @@ async function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Test-only helper. After a duck race completes, the queue session moves
+ * to status='complete', and `findActiveSession` (open/racing only) returns
+ * null. Each duck-race scenario in the test suite needs its own fresh
+ * queue, so this closes any lingering session and creates a new one.
+ *
+ * Tolerant of every prior state — close 404s and create 409s are both
+ * non-fatal here; the goal is "queue is open and fresh when this returns".
+ */
+async function ensureFreshQueue() {
+    try {
+        const existing = await queueSource.getActiveQueue();
+        if (existing) {
+            try { await queueSource.closeQueue(existing.id); } catch { /* ok */ }
+        }
+    } catch { /* ok */ }
+
+    try {
+        await queueSource.createQueue();
+    } catch (e) {
+        // Either we somehow lost the race or there's a still-open session
+        // this helper couldn't close. Log and fall through — the caller's
+        // own getActiveQueue will surface the real problem.
+        console.error('ensureFreshQueue createQueue failed:', e.message);
+    }
+    return queueSource.getActiveQueue();
+}
+
 // =========================================================================
 // Flow 1: Card Night Critical Path
 // =========================================================================
@@ -194,7 +223,7 @@ async function delay(ms) {
 async function runCardNightFlow(testChannel) {
     const results = [];
     const rhapttv = buildTestMention();
-    let sellListingId, reservedListingId, listSessionId, gammaListingId, pullListingId;
+    let sellListingId, reservedListingId, listSessionId, gammaListingId;
 
     await testChannel.send({ embeds: [new EmbedBuilder()
         .setTitle('🌙 Card Night Critical Path')
@@ -433,30 +462,31 @@ async function runCardNightFlow(testChannel) {
     }));
 
     // --- PULL BOX ---
-    results.push(await step('!pull open', async () => {
-        const msg = buildTestMessage('!pull "TEST Pull" 1.00', testChannel);
-        await handlePull(msg, ['"TEST', 'Pull"', '1.00']);
-        const listing = db.prepare("SELECT * FROM card_listings WHERE card_name = 'TEST Pull' AND status = 'pull' ORDER BY id DESC LIMIT 1").get();
-        if (!listing) throw new Error('Pull listing not created');
-        pullListingId = listing.id;
+    // !pull was refactored from a card-shop-listing-style command (price-per-pull)
+    // to a tier-based gacha-box command (V = $1, VMAX = $2, fixed N slots) that
+    // creates a row in WP's `pull_boxes` table (not local `card_listings`). These
+    // steps exercise the current API and clean up after themselves.
+    let pullBoxId = null;
+    results.push(await step('!pull v open', async () => {
+        const msg = buildTestMessage('!pull v "TEST Pull" 5', testChannel);
+        await handlePull(msg, ['v', '"TEST', 'Pull"', '5']);
+        const box = await wpPullBox.getActiveBox('v');
+        if (!box) throw new Error('Pull box not created in WP');
+        if (box.tier !== 'v') throw new Error(`Wrong tier: ${box.tier}`);
+        if (box.totalSlots !== 5) throw new Error(`Wrong slot count: ${box.totalSlots}`);
+        pullBoxId = box.id;
     }));
 
-    results.push(await step('Simulate: rhapttv clicks Buy Pull', async () => {
-        // Pull buy just shows a checkout URL — verify listing exists
-        const listing = cardListings.getById.get(pullListingId);
-        if (listing.status !== 'pull') throw new Error('Pull listing not in pull status');
-    }));
-
-    results.push(await step('Fake purchase (pull, qty 1)', async () => {
-        const session = fakeCheckoutSession({ listingId: pullListingId, name: 'TEST Pull', price: 100 });
-        session.metadata.line_items = JSON.stringify([{ name: 'TEST Pull', quantity: 1, stock_remaining: 5 }]);
-        await handleCheckoutCompleted(session);
-    }));
-
-    results.push(await step('Fake purchase (pull, qty 3)', async () => {
-        const session = fakeCheckoutSession({ listingId: pullListingId, name: 'TEST Pull', price: 300 });
-        session.metadata.line_items = JSON.stringify([{ name: 'TEST Pull', quantity: 3, stock_remaining: 5 }]);
-        await handleCheckoutCompleted(session);
+    results.push(await step('!pull v open refused when already active', async () => {
+        // The new API enforces "exactly one active box per tier" at the
+        // homepage modal layer; verify the bot rejects a duplicate open.
+        const msg = buildTestMessage('!pull v "TEST Pull Dup" 5', testChannel);
+        const replies = [];
+        msg.reply = async (c) => { replies.push(typeof c === 'string' ? c : (c?.content || '')); };
+        await handlePull(msg, ['v', '"TEST', 'Pull', 'Dup"', '5']);
+        if (!replies.some((r) => /already active/i.test(r))) {
+            throw new Error(`Expected "already active" rejection, got: ${replies.join(' | ')}`);
+        }
     }));
 
     results.push(await step('!pull status', async () => {
@@ -464,9 +494,11 @@ async function runCardNightFlow(testChannel) {
         await handlePull(msg, ['status']);
     }));
 
-    results.push(await step('!pull close', async () => {
-        const msg = buildTestMessage('!pull close', testChannel);
-        await handlePull(msg, ['close']);
+    results.push(await step('!pull close v', async () => {
+        const msg = buildTestMessage('!pull close v', testChannel);
+        await handlePull(msg, ['close', 'v']);
+        const stillOpen = await wpPullBox.getActiveBox('v');
+        if (stillOpen) throw new Error(`V-tier box should be closed, still active: ${stillOpen.id}`);
     }));
 
     // --- MANUAL OVERRIDE ---
@@ -609,9 +641,12 @@ async function runCardNightFlow(testChannel) {
     await delay(3000);
 
     // --- DUCK RACE (random — no preselect) ---
+    // The previous `!duckrace pick` race has consumed the queue (status now
+    // 'complete' — findActiveSession returns null), so we open a fresh one
+    // for this scenario.
     results.push(await step('Inject buyers for random duck race', async () => {
-        const queue = await queueSource.getActiveQueue();
-        if (!queue) throw new Error('No active queue after pick race');
+        const queue = await ensureFreshQueue();
+        if (!queue) throw new Error('Could not create a fresh queue for the random race');
         const ref = `fake_random_${Date.now()}`;
         await queueSource.addEntry({
             queueId: queue.id, discordUserId: TEST_USER_ID, customerEmail: TEST_EMAIL,
@@ -636,9 +671,11 @@ async function runCardNightFlow(testChannel) {
     await delay(3000);
 
     // --- DUCK RACE (manual winner) ---
+    // Random race has consumed the queue too — open a fresh one for the
+    // manual-winner scenario.
     results.push(await step('Inject buyers for manual duck race', async () => {
-        const queue = await queueSource.getActiveQueue();
-        if (!queue) throw new Error('No active queue after random race');
+        const queue = await ensureFreshQueue();
+        if (!queue) throw new Error('Could not create a fresh queue for the manual race');
         const ref = `fake_manual_${Date.now()}`;
         await queueSource.addEntry({
             queueId: queue.id, discordUserId: TEST_USER_ID, customerEmail: TEST_EMAIL,
@@ -984,9 +1021,13 @@ async function runRaceConditionFlow(testChannel) {
     }));
 
     // --- DUCK RACE: atomic claimForRace ---
+    // ensureFreshQueue closes any lingering session from prior race-condition
+    // steps so the WP `session_exists` 409 doesn't block this scenario. The
+    // test's actual assertion (line 1003-1010) is that the SECOND `claimForRace`
+    // returns changes=0, not that createQueue itself rejects duplicates.
     results.push(await step('Duck race: only one race can claim a queue', async () => {
-        await queueSource.createQueue();
-        const queue = await queueSource.getActiveQueue();
+        const queue = await ensureFreshQueue();
+        if (!queue) throw new Error('Could not create a fresh queue for the atomic-claim test');
         const s1 = `race_s1_${Date.now()}`;
         const s2 = `race_s2_${Date.now()}`;
         await queueSource.addEntry({
