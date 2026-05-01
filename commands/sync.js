@@ -28,37 +28,62 @@ function getNodePath() {
 }
 
 /**
+ * Promote a child-process exec failure into something diagnostic. Without
+ * this, every script failure surfaces as the generic "Command failed: …"
+ * line and the actual stderr lines from the script (Google credentials
+ * missing, Stripe rate-limit, sheets quota, etc.) get swallowed. We
+ * stitch a short tail of stderr onto the thrown error message so callers
+ * (handleSync's catch block + #test-suite embed) get the real cause.
+ */
+function annotateExecError(e) {
+    if (!e || typeof e !== 'object') return e;
+    const stderrTail = (e.stderr || '').toString().trim().split('\n').slice(-6).join('\n');
+    if (stderrTail) {
+        e.message = `${e.message}\n${stderrTail}`;
+    }
+    return e;
+}
+
+/**
  * Run push-products.js (Sheets → Stripe).
  */
 async function pushToStripe(clean) {
     const args = [PUSH_SCRIPT];
     if (clean) args.push('--clean');
-    const { stdout } = await exec(getNodePath(), args, {
-        cwd: BOT_ROOT,
-        timeout: 120000,
-        env: { ...process.env, HOME: process.env.HOME || '/root' },
-    });
-    return stdout;
+    try {
+        const { stdout } = await exec(getNodePath(), args, {
+            cwd: BOT_ROOT,
+            timeout: 120000,
+            env: { ...process.env, HOME: process.env.HOME || '/root' },
+        });
+        return stdout;
+    } catch (e) {
+        throw annotateExecError(e);
+    }
 }
 
 /**
  * Run pull-products.php (Stripe → WordPress).
  */
 async function pullToWordPress() {
-    const { stdout } = await exec('wp', [
-        'eval-file', PULL_SCRIPT,
-        `--path=${WP_PATH}`,
-        '--allow-root',
-    ], {
-        cwd: BOT_ROOT,
-        timeout: 120000,
-        env: {
-            ...process.env,
-            PUBLISH: '1',
-            CLEAN: '1',
-        },
-    });
-    return stdout;
+    try {
+        const { stdout } = await exec('wp', [
+            'eval-file', PULL_SCRIPT,
+            `--path=${WP_PATH}`,
+            '--allow-root',
+        ], {
+            cwd: BOT_ROOT,
+            timeout: 120000,
+            env: {
+                ...process.env,
+                PUBLISH: '1',
+                CLEAN: '1',
+            },
+        });
+        return stdout;
+    } catch (e) {
+        throw annotateExecError(e);
+    }
 }
 
 /**
