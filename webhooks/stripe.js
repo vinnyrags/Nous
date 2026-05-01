@@ -23,6 +23,7 @@ import { recordPullPurchase, recordPullBoxPurchase } from '../commands/pull.js';
 import * as queueSource from '../lib/queue-source.js';
 import { createOrder } from '../shippingeasy-api.js';
 import { broadcastLowStock, broadcastSoldOut } from '../lib/activity-broadcaster.js';
+import { normalizeEmail } from '../lib/normalize-email.js';
 
 const stripe = new Stripe(config.STRIPE_SECRET_KEY);
 
@@ -39,14 +40,16 @@ const stripe = new Stripe(config.STRIPE_SECRET_KEY);
 async function handleCheckoutCritical(session) {
     // Ad-hoc shipping — record in unified tracker
     if (session.metadata?.source === 'ad-hoc-shipping') {
-        const email = session.customer_details?.email;
+        const email = normalizeEmail(session.customer_details?.email);
         if (email) {
             recordShipping(email, session.metadata.discord_user_id || null, session.amount_total || 0, 'ad-hoc', session.id);
         }
         return null;
     }
 
-    const customerEmail = session.customer_details?.email || session.customer_email;
+    // Normalize once at the entry point — every downstream linkDiscord,
+    // insertPurchase, recordShipping, and queue mirror keys off this value.
+    const customerEmail = normalizeEmail(session.customer_details?.email || session.customer_email);
     const totalAmount = session.amount_total;
 
     // Resolve line items — prefer metadata (bot endpoints), fall back to Stripe API (WordPress/external)

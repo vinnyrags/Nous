@@ -8,6 +8,7 @@
 
 import config from './config.js';
 import { purchases, shipping, discordLinks } from './db.js';
+import { normalizeEmail } from './lib/normalize-email.js';
 
 /**
  * Check if a Discord user is flagged as international.
@@ -21,7 +22,9 @@ function isInternational(discordUserId) {
  * Check if a buyer (by email) is international.
  */
 function isInternationalByEmail(email) {
-    const row = discordLinks.getCountryByEmail.get(email);
+    const normalized = normalizeEmail(email);
+    if (!normalized) return false;
+    const row = discordLinks.getCountryByEmail.get(normalized);
     return !!(row?.country && row.country !== 'US');
 }
 
@@ -50,13 +53,15 @@ function getShippingRateByEmail(email) {
  * International: checks this month.
  */
 function hasShippingCovered(email) {
-    const intl = isInternationalByEmail(email);
+    const normalized = normalizeEmail(email);
+    if (!normalized) return false;
+    const intl = isInternationalByEmail(normalized);
 
     if (intl) {
-        return !!shipping.hasShippingThisMonth.get(email);
+        return !!shipping.hasShippingThisMonth.get(normalized);
     }
 
-    return !!shipping.hasShippingThisWeek.get(email);
+    return !!shipping.hasShippingThisWeek.get(normalized);
 }
 
 /**
@@ -73,7 +78,9 @@ function hasShippingCoveredByDiscordId(discordUserId) {
  * Record a shipping payment in the unified shipping_payments table.
  */
 function recordShipping(email, discordUserId, amount, source, stripeSessionId = null) {
-    shipping.record.run(email, discordUserId || null, amount, source, stripeSessionId || null);
+    const normalized = normalizeEmail(email);
+    if (!normalized) return;
+    shipping.record.run(normalized, discordUserId || null, amount, source, stripeSessionId || null);
 }
 
 /**
@@ -81,13 +88,15 @@ function recordShipping(email, discordUserId, amount, source, stripeSessionId = 
  * Auto-detects domestic vs international based on email.
  */
 function getShippingRecord(email) {
-    const intl = isInternationalByEmail(email);
+    const normalized = normalizeEmail(email);
+    if (!normalized) return null;
+    const intl = isInternationalByEmail(normalized);
 
     if (intl) {
-        return shipping.getByEmailThisMonth.get(email) || null;
+        return shipping.getByEmailThisMonth.get(normalized) || null;
     }
 
-    return shipping.getByEmailThisWeek.get(email) || null;
+    return shipping.getByEmailThisWeek.get(normalized) || null;
 }
 
 /**

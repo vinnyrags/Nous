@@ -124,7 +124,7 @@ async function handleModalSubmit(interaction) {
 async function handleEmailLinkSubmit(interaction) {
     if (!interaction.customId.startsWith('email-link-')) return;
 
-    const email = interaction.fields.getTextInputValue('email_input')?.trim();
+    const email = interaction.fields.getTextInputValue('email_input')?.trim().toLowerCase();
     if (!email || !email.includes('@')) {
         return interaction.reply({ content: 'Please enter a valid email address.', ephemeral: true });
     }
