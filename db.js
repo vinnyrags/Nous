@@ -8,7 +8,11 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const db = new Database(path.resolve(__dirname, 'data.db'));
+// NOUS_DB_PATH env override: lets integration tests open a per-spec
+// SQLite file (or :memory:) without touching production data.db.
+// Production deploys never set it, so the existing path stays the default.
+const dbPath = process.env.NOUS_DB_PATH || path.resolve(__dirname, 'data.db');
+const db = new Database(dbPath);
 
 // Enable WAL mode for better concurrent read performance
 db.pragma('journal_mode = WAL');
