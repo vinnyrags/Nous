@@ -88,8 +88,9 @@ const commands = [
         .setDefaultMemberPermissions(ADMIN_ONLY)
         .addStringOption((o) => o
             .setName('products')
-            .setDescription('Comma-separated product names, e.g. "Crown Zenith, Prismatic Evolutions"')
-            .setRequired(true)),
+            .setDescription('Comma-separated product names — autocomplete suggests as you type')
+            .setRequired(true)
+            .setAutocomplete(true)),
 
     // /battle <subcommand>
     new SlashCommandBuilder()
@@ -99,7 +100,7 @@ const commands = [
         .addSubcommand((s) => s
             .setName('start')
             .setDescription('Start a new pack battle')
-            .addStringOption((o) => o.setName('product').setDescription('Product name').setRequired(true))
+            .addStringOption((o) => o.setName('product').setDescription('Product name').setRequired(true).setAutocomplete(true))
             .addIntegerOption((o) => o.setName('max').setDescription('Max entries (default 20, capped at 50)').setMinValue(2).setMaxValue(50)))
         .addSubcommand((s) => s.setName('close').setDescription('Close the active battle'))
         .addSubcommand((s) => s.setName('cancel').setDescription('Cancel the active battle'))

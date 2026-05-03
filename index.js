@@ -33,6 +33,7 @@ import { client } from './discord.js';
 import { startServer } from './server.js';
 import { initGiveaways } from './commands/giveaway.js';
 import { syncBotCommands } from './sync-bot-commands.js';
+import * as productCache from './lib/product-cache.js';
 import { initCommunityGoals } from './community-goals.js';
 import { initWelcome } from './commands/welcome.js';
 import { initMinecraftChannel, handleMinecraftReaction } from './commands/minecraft.js';
@@ -124,15 +125,42 @@ const SLASH_HANDLERS = {
 
 async function routeAutocomplete(interaction) {
     const focused = interaction.options.getFocused(true);
-    const value = (focused?.value || '').toString().toLowerCase().trim();
+    const value = (focused?.value || '').toString();
+    const lower = value.toLowerCase().trim();
 
     if (interaction.commandName === 'op' && focused.name === 'command') {
         // /op <command> — match against the legacy command names
         const matches = ROUTE_NAMES
-            .filter((name) => !value || name.toLowerCase().startsWith(value))
+            .filter((name) => !lower || name.toLowerCase().startsWith(lower))
             .slice(0, 25)
             .map((name) => ({ name, value: name }));
         return interaction.respond(matches);
+    }
+
+    if (interaction.commandName === 'battle' && focused.name === 'product') {
+        // /battle start product:<name> — single product, classic autocomplete
+        return interaction.respond(productCache.suggest(value, 25));
+    }
+
+    if (interaction.commandName === 'hype' && focused.name === 'products') {
+        // /hype products:"Crown Zenith ETB, Prismatic Evolutions" — multi-
+        // product comma list. Autocomplete only the LAST term after the
+        // last comma; preserve everything before it. The picked suggestion
+        // replaces the last term inline.
+        const lastComma = value.lastIndexOf(',');
+        const prefix = lastComma >= 0 ? value.slice(0, lastComma + 1).trimEnd() + ' ' : '';
+        const tail = lastComma >= 0 ? value.slice(lastComma + 1).trimStart() : value.trim();
+        const tailMatches = productCache.suggest(tail, 25);
+        const choices = tailMatches.map(({ name }) => {
+            const composed = `${prefix}${name}`;
+            // Discord caps choice value at 100 chars; truncate if the
+            // composed string overflows
+            return {
+                name: composed.length <= 100 ? composed : `…${name}`.slice(0, 100),
+                value: composed.slice(0, 100),
+            };
+        });
+        return interaction.respond(choices);
     }
 
     // No autocomplete handler registered for this option — return empty so
@@ -232,6 +260,10 @@ client.once('ready', async () => {
 
     // Sync #bot-commands reference
     await syncBotCommands();
+
+    // Warm the Stripe product cache for autocomplete (non-blocking — if
+    // Stripe is unreachable we fall back to empty suggestions, no crash)
+    productCache.refresh().catch(() => {});
 
     // Initialize community goals pinned message
     await initCommunityGoals();
