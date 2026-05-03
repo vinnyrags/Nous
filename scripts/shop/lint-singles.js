@@ -11,6 +11,12 @@
  *      has a game-series tag ("XY"/"SM") instead of a real number
  *   6. K-flavored rows pointing at a non-K entry
  *      ("Alternate Full Art" → swsh5-154 instead of swsh5-155)
+ *   7. P (release_date) not in YYYY-MM-DD form — the storefront sorts
+ *      via string compare, so "2021/03/19" sorts AFTER every dash-form
+ *      date (because "/" > "-" in ASCII) and silently dumps the row at
+ *      the very end of the chronological grid. The Pokemon TCG API
+ *      returns slashes natively, so any row enriched via the API
+ *      without normalization trips this.
  *
  * Doesn't touch the sheet — read-only.
  *
@@ -220,6 +226,7 @@ async function main() {
         const setName = (row[COL.I] || '').trim();
         const setCode = (row[COL.J] || '').trim();
         const variant = (row[COL.K] || '').trim();
+        const releaseDate = (row[COL.P] || '').trim();
         const apiId = (row[COL.R] || '').trim();
 
         const issues = [];
@@ -234,6 +241,16 @@ async function main() {
         // 2. Variant label sanity
         if (variant && !KNOWN_VARIANTS.has(variant)) {
             issues.push({ sev: 'warn', msg: `K (variant) = "${variant}" is not a known label; review for typo or extend KNOWN_VARIANTS in lint-singles.js` });
+        }
+
+        // 7. Release-date format. Storefront sorts release_date via string
+        // compare; "/" sorts AFTER "-" so a slash-form date dumps the row
+        // at the end of the grid. Hard error: silent sort breakage.
+        if (releaseDate && !/^\d{4}-\d{2}-\d{2}$/.test(releaseDate)) {
+            const suggestion = /^\d{4}\/\d{2}\/\d{2}$/.test(releaseDate)
+                ? ` (rewrite as "${releaseDate.replace(/\//g, '-')}")`
+                : '';
+            issues.push({ sev: 'error', msg: `P (release_date) = "${releaseDate}" is not YYYY-MM-DD${suggestion}` });
         }
 
         // 3-6 require an API ID. Skip if blank (will be filled by enrich).
