@@ -356,7 +356,7 @@ app.get('/battle/checkout/:id', async (req, res) => {
         }
 
         // No shipping on battle buy-in — only the winner gets shipped product.
-        // Winner's shipping is handled after !battle winner declaration.
+        // Winner's shipping is handled after /battle winner declaration.
 
         const session = await stripe.checkout.sessions.create(params);
 
@@ -647,7 +647,7 @@ app.get('/shipping/lookup', (req, res) => {
     // shipping period that wasn't theirs. The link gate ensures the buyer
     // we're crediting is the same identity that paid for shipping in the
     // first place. Internal callers that already know the buyer's Discord
-    // identity (webhooks, `!shipping`) use `hasShippingCoveredByDiscordId`
+    // identity (webhooks, `/shipping`) use `hasShippingCoveredByDiscordId`
     // which keys on the Discord id, not the email, and so isn't affected.
     const covered = known && hasShippingCovered(email);
 

@@ -41,25 +41,28 @@ Key variables:
 - `QUEUE_SOURCE` — `sqlite` (default, legacy local tables) or `wp` (WordPress as source of truth via `/shop/v1/queue/*`). Switch after running `scripts/migrate-queue-to-wp.js` and validating in staging — see [Queue cutover](#queue-cutover)
 - `STRIPE_DELETE_WHEN_REMOVING` — `true` (default) deletes Stripe products on `push-products.js --clean` / `push-cards.js --clean` so archived rows don't accumulate and silently break checkouts. Set to `false` before going live so prices with payment history aren't blocked from delete (Stripe rejects deleting anything with charges; the script falls back to archive automatically when it has to)
 
-### Queue commands (during livestream)
+### Slash commands
 
-- `!queue` — show the current queue
-- `!queue open` / `!queue close` — open/close (mods only; usually automated by `!live` / `!offline`)
-- `!queue history` — last five queues
-- **`!queue next`** — advance the queue: completes the current "Now Serving" entry and promotes the oldest queued entry to active. Completed entries appear in the "Already opened" timeline above the active block on the homepage. Mods only. (Requires `QUEUE_SOURCE=wp` — the legacy SQLite path doesn't track entry status.)
-- **`!queue skip <position>`** — god-mode jump to any entry by homepage position (1-based). Position 1 is the active entry, positions 2+ are queued in oldest-first order. The previous active goes back to queued (not completed) so nothing is lost. Mods only.
-- `!duckrace` / `!duckrace start` / `!duckrace winner @user` — duck race roster + animation
+All ops commands run as Discord slash commands as of 2026-05-03 (Akivili-only via Discord permissions + runtime role check). The legacy `!command` text dispatcher was removed in commit `5b27918`. See `bot-commands.js` for the full reference embed (auto-synced to `#bot-commands`).
 
-### Pull-box commands (livestream)
+**Queue & duck race (during livestream):**
+- `/queue open` / `/queue close` — open/close (usually automated by `/live` and `/offline`)
+- `/queue history` — last five queues
+- `/queue next` — advance the queue: completes the current "Now Serving" entry, promotes the oldest queued entry to active. Completed entries appear on the homepage timeline. Requires `QUEUE_SOURCE=wp`.
+- `/queue skip` — god-mode skip the current entry (returns to queued, not completed)
+- `/duckrace show` / `/duckrace start` / `/duckrace winner user:<@user>` — roster + animation
+- `/duckrace pick user:<@user>` — owner-only rig before running
+
+**Pull boxes (livestream):**
 
 Pull boxes are slot-based — each box has a finite number of numbered slots that buyers claim. WordPress is the source of truth (`wp_pull_boxes` + `wp_pull_box_slots`), Nous reads/writes via REST.
 
-- `!pull v "Vintage Box" 100`  — open a v-tier ($1) box with 100 slots
-- `!pull vmax "VMAX Box" 50`   — open a vmax-tier ($2) box with 50 slots
-- `!pull "Box" 1.00 100`       — legacy syntax, tier inferred from price ($1→v, $2→vmax)
-- `!pull replenish [v|vmax] 50` — add 50 slots without resetting claims
-- `!pull close [v|vmax]`       — close (tier required only when both open)
-- `!pull status`                — list active boxes
+- `/pull open` — opens a pull box; pass tier + name + max in `args:` (e.g. `args:v "Vintage Box" 100`, or legacy `args:"Box" 1.00 100`)
+- `/pull replenish` — adds slots without resetting claims (`args:v 50`)
+- `/pull close` — closes the active box (`args:v` or `args:vmax` if both open)
+- `/pull status` — lists active boxes
+
+For ad-hoc invocations matching the legacy syntax (free-form args), use `/op pull ...`.
 
 Homepage buyers pick specific slots via a modal grid. Discord buyers get a modal too — quantity input plus an optional comma-separated slot list (`17, 23, 41`); blank slots field auto-assigns the lowest open slots, filled-in slots are atomically pre-claimed through the same `/shop/v1/pull-box-checkout` endpoint the homepage uses. The on-stream embed in `#card-shop` shows a compact unicode slot grid (⬜ open, 🟪 claimed) that updates live as buys land.
 
@@ -79,7 +82,7 @@ Homepage buyers pick specific slots via a modal grid. Discord buyers get a modal
 | `community-goals.js` | Community goal tracking and progress updates |
 | `livestream-flow.js` | Card night flow orchestration — queue open, battles, duck races, stream end |
 | `notify-deploy.js` | Deploy status notifications to `#dev-log` |
-| `commands/` | Message command handlers (`!sell`, `!battle`, `!queue`, `!requests`/`!request`, etc.) plus auto-managed channel embeds (`welcome.js`, `minecraft.js`, `lfg.js`) |
+| `commands/` | Slash command handlers in commands/slash/ (universal `/op`, native `/queue`, `/battle`, `/reset`, etc.) plus legacy text-mode handlers (one per command file) that the slash framework wraps via the synthetic-message factory plus auto-managed channel embeds (`welcome.js`, `minecraft.js`, `lfg.js`) |
 | `webhooks/` | Stripe, Twitch, ShippingEasy, and card-request webhook handlers |
 | `alerts/` | New-product alerts and channel messaging |
 | `scripts/` | Operational scripts (see below) |
@@ -145,7 +148,7 @@ To migrate:
 1. Run `node scripts/migrate-queue-to-wp.js --dry-run` and review output
 2. Run `node scripts/migrate-queue-to-wp.js --limit=20` to copy recent sessions
 3. Set `QUEUE_SOURCE=wp` in `/opt/nous-bot/.env` and restart the systemd service
-4. Verify `!queue` and the itzenzo.tv homepage Live Queue section both show the same data
+4. Verify `/queue history` and the itzenzo.tv homepage Live Queue section both show the same data
 
 To roll back: set `QUEUE_SOURCE=sqlite` and restart. Local SQLite tables are still maintained alongside WP writes, so nothing is lost.
 

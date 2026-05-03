@@ -80,11 +80,15 @@ const commands = [
                 { name: 'stripe', value: 'stripe' },
             )),
 
-    // /hype — community goal hype announcement
+    // /hype — pre-stream hype, looks up products in Stripe
     new SlashCommandBuilder()
         .setName('hype')
-        .setDescription('Community-goal hype announcement')
-        .setDefaultMemberPermissions(ADMIN_ONLY),
+        .setDescription('Pre-stream hype: look up products in Stripe, post embed + checkout URLs')
+        .setDefaultMemberPermissions(ADMIN_ONLY)
+        .addStringOption((o) => o
+            .setName('products')
+            .setDescription('Comma-separated product names, e.g. "Crown Zenith, Prismatic Evolutions"')
+            .setRequired(true)),
 
     // /battle <subcommand>
     new SlashCommandBuilder()

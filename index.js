@@ -5,24 +5,27 @@
  *  - Order notifications (Stripe → #order-feed)
  *  - Low-stock alerts (Stripe → #deals)
  *  - Going-live / stream-ended (Twitch → #announcements)
- *  - Livestream mode (!live / !offline — master switches for stream sessions)
- *  - Pack battle system (!battle commands + Stripe payment verification)
- *  - Queue system (!queue open/close + auto-entries from Stripe purchases)
- *  - Duck race (!duckrace — one entry per unique buyer in queue)
- *  - Account linking (auto via Stripe metadata, manual via #welcome Link Account button)
+ *  - Livestream mode (/live, /offline — master switches for stream sessions)
+ *  - Pack battle system (/battle commands + Stripe payment verification)
+ *  - Queue system (/queue open|close + auto-entries from Stripe purchases)
+ *  - Duck race (/duckrace — one entry per unique buyer in queue)
+ *  - Account linking (auto via Stripe metadata, /link as user-facing fallback)
  *  - Role promotion (Xipe at 1+ purchases, Long at 5+)
  *  - New product alerts (POST /alerts/products → #deals)
- *  - Duck race winner closes queue, opens next for pre-orders
  *  - Real-time queue embed updated in #queue
- *  - Shipping notifications (!dropped-off → DMs buyers, posts to #order-feed + #ops)
- *  - Analytics (!snapshot → on-demand snapshots, auto stream recaps on !offline)
- *  - Giveaway system (!giveaway — reaction-based entries, social funnel, duck race draw)
- *  - Product sync (!sync — Sheets → Stripe → WordPress pipeline)
- *  - Coupons (!coupon — create, activate, deactivate promo codes for Stripe checkout)
+ *  - Shipping notifications (/dropped-off → DMs buyers, posts to #order-feed + #ops)
+ *  - Analytics (/snapshot → on-demand snapshots, auto stream recaps on /offline)
+ *  - Giveaway system (/giveaway — reaction-based entries, /spin for animated draw)
+ *  - Product sync (/sync — Sheets → Stripe → WordPress pipeline)
+ *  - Coupons (/coupon create|off|status — Stripe promo codes)
+ *
+ * All ops commands are Discord slash commands (Akivili-only). The
+ * legacy `!command` text dispatcher was removed 2026-05-03 in commit
+ * 5b27918. /link is the only user-facing slash command.
  *
  * Usage:
- *   node bot/index.js
- *   npm start (from bot/ directory)
+ *   node index.js
+ *   npm start
  */
 
 import config from './config.js';
