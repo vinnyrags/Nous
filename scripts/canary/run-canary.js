@@ -103,17 +103,30 @@ const CHECKS = [
         // enough headroom without masking real regressions.
         slo: 1500,
     },
+    // WP homepage runs BEFORE the WP REST queue endpoint so DNS, TLS,
+    // and the PHP-FPM worker pool are warm by the time we measure the
+    // queue endpoint. Without this priming step the queue endpoint
+    // measured 2-3s consistently even though direct curl shows 200-450ms;
+    // the cost was first-time-host TLS + cold FPM worker, not the
+    // endpoint itself.
+    //
+    // The homepage now absorbs that cold-start cost. It runs intermittently
+    // — there's no buyer-facing pressure on vincentragosta.io/ during
+    // streams (buyers shop at itzenzo.tv) — so cold-start variability is
+    // expected. SLO is 5000ms to ride out FPM warm-up; if it consistently
+    // creeps higher, that's a signal of real WP-backend slowdown worth
+    // investigating, not canary noise.
+    {
+        url: `${WP}/`,
+        name: 'vincentragosta.io homepage',
+        expect: ({ status }) => status === 200,
+        slo: 5000,
+    },
     {
         url: `${WP}/wp-json/shop/v1/queue`,
         name: 'vincentragosta.io /wp-json/shop/v1/queue',
         expect: ({ status }) => status === 200,
         slo: 2000,
-    },
-    {
-        url: `${WP}/`,
-        name: 'vincentragosta.io homepage',
-        expect: ({ status }) => status === 200,
-        slo: 3000,
     },
 ];
 
