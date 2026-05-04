@@ -140,15 +140,33 @@ function altTier(variant) {
 }
 
 async function fetchSet(setId) {
-    // Single set query, retry once on 429 with backoff. Returns array.
-    for (let attempt = 0; attempt < 2; attempt++) {
-        const res = await fetch('https://api.pokemontcg.io/v2/cards?q=set.id:' + encodeURIComponent(setId) + '&pageSize=250');
-        if (res.ok) return (await res.json()).data || [];
-        if (res.status === 429 && attempt === 0) {
-            await new Promise((r) => setTimeout(r, 2500));
-            continue;
+    // Paginate. Sets like Fusion Strike (284 cards) and Vivid Voltage (203
+    // printed but 280+ with secrets) overflow a single 250-page response,
+    // so cards beyond the first page are silently missed and lint reports
+    // them as "doesn't exist in pokemontcg.io". Walk pages until we've
+    // collected totalCount or hit a short page.
+    const all = [];
+    let page = 1;
+    while (true) {
+        const url = 'https://api.pokemontcg.io/v2/cards?q=set.id:' + encodeURIComponent(setId) + '&pageSize=250&page=' + page;
+        let res;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            res = await fetch(url);
+            if (res.ok) break;
+            if (res.status === 429 && attempt === 0) {
+                await new Promise((r) => setTimeout(r, 2500));
+                continue;
+            }
+            throw new Error('API ' + res.status + ' for set ' + setId + ' (page ' + page + ')');
         }
-        throw new Error('API ' + res.status + ' for set ' + setId);
+        const json = await res.json();
+        const cards = json.data || [];
+        all.push(...cards);
+        const total = json.totalCount || 0;
+        if (cards.length < 250 || all.length >= total) return all;
+        page++;
+        // Pace pages — a multi-page set should still respect the 30 req/min cap.
+        await new Promise((r) => setTimeout(r, 1100));
     }
 }
 

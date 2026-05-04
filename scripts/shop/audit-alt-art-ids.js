@@ -113,11 +113,25 @@ function setIdFromApiId(apiId) {
 }
 
 async function fetchSetCards(setId) {
-    const url = `https://api.pokemontcg.io/v2/cards?q=set.id:${encodeURIComponent(setId)}&pageSize=250&orderBy=number`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`API ${res.status} for ${setId}: ${await res.text()}`);
-    const json = await res.json();
-    return json.data || [];
+    // Paginate. Sets like Fusion Strike (284 cards) overflow a single
+    // 250-page response, so cards beyond the first page are silently
+    // missed. Walk pages until we've collected totalCount or hit a short
+    // page.
+    const all = [];
+    let page = 1;
+    while (true) {
+        const url = `https://api.pokemontcg.io/v2/cards?q=set.id:${encodeURIComponent(setId)}&pageSize=250&page=${page}&orderBy=number`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`API ${res.status} for ${setId} (page ${page}): ${await res.text()}`);
+        const json = await res.json();
+        const cards = json.data || [];
+        all.push(...cards);
+        const total = json.totalCount || 0;
+        if (cards.length < 250 || all.length >= total) return all;
+        page++;
+        // Pace pages — respect the 30 req/min unauthenticated cap.
+        await new Promise((r) => setTimeout(r, 1100));
+    }
 }
 
 async function main() {
