@@ -27,6 +27,8 @@ import {
     broadcastGoalMilestone,
     broadcastLowStock,
     broadcastSoldOut,
+    broadcastDiscordJoin,
+    broadcastMinecraftJoin,
 } from '../lib/activity-broadcaster.js';
 
 beforeEach(() => {
@@ -141,6 +143,30 @@ describe('stock helpers', () => {
         const [event, payload] = lastCall();
         expect(event).toBe('activity.stock.sold_out');
         expect(payload.icon).toBe('🚫');
+    });
+});
+
+describe('community signal helpers', () => {
+    it('broadcastDiscordJoin fires activity.discord.join with a generic message', () => {
+        broadcastDiscordJoin();
+        const [event, payload] = lastCall();
+        expect(event).toBe('activity.discord.join');
+        expect(payload.title).toBe('New Discord member');
+        expect(payload.icon).toBe('👋');
+        // No usernames or identifying data leak into the public payload.
+        expect(payload.meta).toEqual({});
+        expect(payload.description).toBe('A new member joined the Discord.');
+    });
+
+    it('broadcastMinecraftJoin fires activity.minecraft.join with a generic message', () => {
+        broadcastMinecraftJoin();
+        const [event, payload] = lastCall();
+        expect(event).toBe('activity.minecraft.join');
+        expect(payload.title).toBe('Minecraft realm join');
+        expect(payload.icon).toBe('⛏️');
+        // No realm key, no user — generic by design.
+        expect(payload.meta).toEqual({});
+        expect(payload.description).toBe('A buyer joined the Minecraft realm.');
     });
 });
 

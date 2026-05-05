@@ -27,6 +27,7 @@ import {
 } from 'discord.js';
 import config from '../config.js';
 import { getChannel, getMember } from '../discord.js';
+import { broadcastMinecraftJoin } from '../lib/activity-broadcaster.js';
 
 // Emoji → realm key map. Single source of truth — used by both the embed
 // builder (to print the legend) and the reaction handler (to look up invites).
@@ -208,14 +209,26 @@ async function handleMinecraftReaction(reaction, user) {
         ? { embeds: [embed], components: [buildJavaWhitelistButtonRow()] }
         : { embeds: [embed] };
 
+    let dmSent = false;
     try {
         const member = await getMember(user.id);
         if (member) {
             const dm = await member.createDM();
             await dm.send(payload);
+            dmSent = true;
         }
     } catch (e) {
         console.warn(`Failed to DM ${user.tag || user.id} for ${realm.key}:`, e.message);
+    }
+
+    // Only broadcast on successful DM — a failed invite delivery means
+    // the user didn't actually get the realm code, so the "joined" signal
+    // would be premature. The broadcast itself is generic (no realm,
+    // no user) — see lib/activity-broadcaster.js.
+    if (dmSent) {
+        try { broadcastMinecraftJoin(); } catch (e) {
+            console.error('Error broadcasting minecraft join:', e.message);
+        }
     }
 
     await removeReaction();

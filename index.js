@@ -38,6 +38,7 @@ import { initCommunityGoals } from './community-goals.js';
 import { initWelcome } from './commands/welcome.js';
 import { initMinecraftChannel, handleMinecraftReaction } from './commands/minecraft.js';
 import { initLfgChannel } from './commands/lfg.js';
+import { broadcastDiscordJoin } from './lib/activity-broadcaster.js';
 // =========================================================================
 // Legacy !command text dispatcher removed 2026-05-03 — all ops commands
 // run as Discord slash commands now (see SLASH_HANDLERS below). Clean
@@ -224,6 +225,28 @@ client.on('interactionCreate', async (interaction) => {
                 await interaction.reply({ content: 'Something went wrong. Try again or ping a mod.', ephemeral: true });
             }
         } catch { /* can't reply */ }
+    }
+});
+
+// =========================================================================
+// New Discord member → Activity Feed signal
+// =========================================================================
+//
+// Fires once per join. Skips bot joins (we never want bot-add events
+// surfacing on the storefront feed). The broadcast itself is generic —
+// no username — so an adversarial join-then-rename can't inject text
+// into the public Activity Feed. See lib/activity-broadcaster.js for
+// the rationale.
+client.on('guildMemberAdd', (member) => {
+    if (member.user?.bot) return;
+    // Only broadcast joins to the production guild (or whichever guild
+    // config.GUILD_ID resolves to in test mode). Avoids cross-guild noise
+    // if the bot is ever in multiple servers.
+    if (member.guild.id !== config.GUILD_ID) return;
+    try {
+        broadcastDiscordJoin();
+    } catch (e) {
+        console.error('Error broadcasting discord join:', e.message);
     }
 });
 
