@@ -437,23 +437,18 @@ app.get('/card-shop/checkout/:listingId', async (req, res) => {
 // the webhook auto-picks the lowest open slots after payment.
 // =========================================================================
 
-app.get('/pull-box/checkout/:tier', async (req, res) => {
-    const tier = req.params.tier;
-    if (!['v', 'vmax'].includes(tier)) {
-        return res.status(400).send('Invalid tier. Must be v or vmax.');
-    }
-
+app.get('/pull-box/checkout', async (req, res) => {
     const wpPullBox = await import('./lib/wp-pull-box.js');
 
     let box;
     try {
-        box = await wpPullBox.getActiveBox(tier);
+        box = await wpPullBox.getActiveBox();
     } catch (e) {
         console.error('Pull-box service unreachable:', e.message);
         return res.status(503).send('Pull-box service unavailable. Try again in a moment.');
     }
     if (!box) {
-        return res.status(404).send('No pull box is currently open for this tier.');
+        return res.status(404).send('No pull box is currently open.');
     }
     if (!box.stripePriceId) {
         console.error(`Pull box #${box.id} has no stripe_price_id — check shop settings ACF config`);
@@ -489,7 +484,6 @@ app.get('/pull-box/checkout/:tier', async (req, res) => {
             metadata: {
                 source: 'pull_box',
                 pull_box_id: String(box.id),
-                tier,
                 discord_user_id: discordUserId || '',
             },
             custom_fields: customFieldsFor(discordUserId),

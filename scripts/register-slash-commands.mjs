@@ -151,11 +151,10 @@ const commands = [
         .setDescription('Pull-box lifecycle')
         .setDefaultMemberPermissions(ADMIN_ONLY)
         .addSubcommand((s) => s.setName('open').setDescription('Open a pull box')
-            .addStringOption((o) => o.setName('args').setDescription('Optional args (tier, slot count, etc)')))
-        .addSubcommand((s) => s.setName('close').setDescription('Close active pull box')
-            .addStringOption((o) => o.setName('args').setDescription('Optional args')))
-        .addSubcommand((s) => s.setName('replenish').setDescription('Add slots to a pull box')
-            .addStringOption((o) => o.setName('args').setDescription('Args (tier, count, etc)')))
+            .addStringOption((o) => o.setName('args').setDescription('"Box Name" <total_slots>')))
+        .addSubcommand((s) => s.setName('close').setDescription('Close the active pull box'))
+        .addSubcommand((s) => s.setName('replenish').setDescription('Add slots to the active pull box')
+            .addStringOption((o) => o.setName('args').setDescription('Slots to add')))
         .addSubcommand((s) => s.setName('status').setDescription('Show current pull-box status')),
 
     // /giveaway — giveaway lifecycle

@@ -1,37 +1,33 @@
 /**
- * Pull Box Command — !pull
+ * Pull Box Command — !pull / /pull
  *
  * Owner-only. Opens, closes, and reports on pull boxes — finite-slot
  * livestream entry pools backed by the WordPress source-of-truth
  * tables (`wp_pull_boxes` + `wp_pull_box_slots`). The Discord embed and
  * the itzenzo.tv homepage modal both project from the same data.
  *
- * Tier-based syntax (preferred):
- *   !pull v   "Vintage Box" 100      — opens the v-tier ($1) box, 100 slots
- *   !pull vmax "VMAX Box"  50        — opens the vmax-tier ($2) box, 50 slots
- *   !pull close [v|vmax]             — closes (tier required only if both open)
- *   !pull replenish [v|vmax] 50      — adds 50 to total_slots
- *   !pull status                      — lists active boxes
+ * Single-box model — only one pull box is open at a time. Price comes
+ * from the WP `pb_price_id` setting (a Stripe price ID lookup); Nous
+ * doesn't need to know the dollar amount up front.
  *
- * Legacy syntax (still works — tier inferred from price $1→v / $2→vmax):
- *   !pull "Box" 1.00 100
+ * Syntax:
+ *   /pull "Box Name" 50          — open a 50-slot box at the configured price
+ *   /pull close                  — close the active box
+ *   /pull replenish 25           — add 25 slots to the active box
+ *   /pull status                 — show the active box state
  */
 
 import { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } from 'discord.js';
 import config from '../config.js';
-import { cardListings, pullEntries } from '../db.js';
 import * as queueSource from '../lib/queue-source.js';
 import * as wpPullBox from '../lib/wp-pull-box.js';
-import { client, getChannel, sendEmbed } from '../discord.js';
+import { getChannel, sendEmbed } from '../discord.js';
 import {
     broadcastPullBoxOpened,
     broadcastPullBoxReplenished,
     broadcastPullBoxClosed,
 } from '../lib/activity-broadcaster.js';
 import { formatShippingRate } from '../shipping.js';
-
-const TIERS = ['v', 'vmax'];
-const PRICE_CENTS_BY_TIER = { v: 100, vmax: 200 };
 
 // ===========================================================================
 // Top-level dispatch
@@ -44,7 +40,7 @@ async function handlePull(message, args) {
 
     const sub = (args[0] || '').toLowerCase();
 
-    if (sub === 'close') return handlePullClose(message, args.slice(1));
+    if (sub === 'close') return handlePullClose(message);
     if (sub === 'replenish') return handlePullReplenish(message, args.slice(1));
     if (sub === 'status') return handlePullStatus(message);
 
@@ -52,39 +48,33 @@ async function handlePull(message, args) {
 }
 
 // ===========================================================================
-// !pull open
+// /pull open
 // ===========================================================================
 
 async function handlePullOpen(message, args) {
-    const parsed = parseOpenArgs(message.content, args);
+    const parsed = parseOpenArgs(message.content);
     if (parsed.error) return message.reply(parsed.error);
 
-    const { tier, name, totalSlots } = parsed;
-    const priceCents = PRICE_CENTS_BY_TIER[tier];
+    const { name, totalSlots, priceCents } = parsed;
 
-    // Refuse if a box is already open for this tier — the homepage
-    // modal expects exactly one active box per tier so the slot grid
-    // is unambiguous.
+    // Refuse if a box is already open — single-box model.
     let existing = null;
     try {
-        existing = await wpPullBox.getActiveBox(tier);
+        existing = await wpPullBox.getActiveBox();
     } catch (e) {
         return message.reply(`Could not reach the pull-box service: ${e.message}`);
     }
     if (existing) {
-        return message.reply(`A ${tier}-tier pull box is already active: **${existing.name}** (#${existing.id}). Close it first with \`!pull close ${tier}\`.`);
+        return message.reply(`A pull box is already active: **${existing.name}** (#${existing.id}). Close it first with \`/pull close\`.`);
     }
 
     let box;
     try {
-        box = await wpPullBox.createBox({ name, tier, priceCents, totalSlots });
+        box = await wpPullBox.createBox({ name, priceCents, totalSlots });
     } catch (e) {
         return message.reply(`Failed to open box: ${e.message}`);
     }
 
-    // Post the embed to #card-shop with a Buy button. customId carries
-    // the tier so the interaction handler can resolve the active box at
-    // click time (no stale listing IDs cached in the embed).
     const channel = getChannel('CARD_SHOP');
     if (!channel) {
         return message.reply('Card-shop channel not found. Box was created in WP but no embed posted.');
@@ -92,7 +82,7 @@ async function handlePullOpen(message, args) {
 
     const embed = buildPullBoxEmbed(box, []);
     const buyButton = new ButtonBuilder()
-        .setCustomId(`pull-buy-${tier}`)
+        .setCustomId('pull-buy')
         .setLabel('Buy Pull(s)')
         .setStyle(ButtonStyle.Primary)
         .setEmoji('🎰');
@@ -100,8 +90,6 @@ async function handlePullOpen(message, args) {
 
     const msg = await channel.send({ embeds: [embed], components: [row] });
 
-    // Record the message id back on the box so the embed can be edited
-    // later when slots get claimed.
     try {
         await wpPullBox.updateBox(box.id, { discordMessageId: msg.id });
     } catch (e) {
@@ -109,92 +97,70 @@ async function handlePullOpen(message, args) {
     }
 
     if (message.channel.id !== channel.id) {
-        await message.channel.send(`🎰 ${tier.toUpperCase()}-tier pull box **${name}** ($${(priceCents / 100).toFixed(2)} × ${totalSlots} slots) is live in <#${config.CHANNELS.CARD_SHOP}>!`);
+        await message.channel.send(`🎰 Pull box **${name}** ($${(priceCents / 100).toFixed(2)} × ${totalSlots} slots) is live in <#${config.CHANNELS.CARD_SHOP}>!`);
     }
 
     broadcastPullBoxOpened(box);
 }
 
 /**
- * Accept either the new tier-based syntax or the legacy quoted-name +
- * dollar-price + slot-count syntax. Returns either { tier, name, totalSlots }
- * or { error: string }.
+ * Parse `/pull "Box Name" <total_slots>` or the legacy
+ * `!pull "Box Name" <price> <total_slots>` form. Returns either
+ * { name, totalSlots, priceCents } or { error: string }.
+ *
+ * Price is normally not specified — falls back to the box's own
+ * Stripe price metadata which WP applies from `pb_price_id`. We default
+ * to 500 cents ($5) when price is omitted so the embed shows something
+ * sensible up front; WP overrides at the source of truth.
  */
-function parseOpenArgs(rawContent, args) {
-    // Strip "!pull " from the leading content
-    const content = rawContent.replace(/^!pull\s+/i, '').trim();
+function parseOpenArgs(rawContent) {
+    const content = rawContent.replace(/^!pull\s+/i, '').replace(/^\/pull\s+/i, '').trim();
 
-    // Tier-prefixed: `v "Name" 100` or `vmax "Name" 50`
-    const firstArg = (args[0] || '').toLowerCase();
-    if (TIERS.includes(firstArg)) {
-        const afterTier = content.replace(new RegExp(`^${firstArg}\\s+`, 'i'), '');
-        const nameMatch = afterTier.match(/"([^"]+)"/);
-        if (!nameMatch) {
-            return { error: `Usage: \`!pull ${firstArg} "Box Name" <total_slots>\`` };
-        }
-        const afterQuote = afterTier.slice(afterTier.lastIndexOf('"') + 1).trim();
-        const totalSlots = parseInt(afterQuote, 10);
-        if (!Number.isFinite(totalSlots) || totalSlots < 1) {
-            return { error: 'Total slots must be a positive integer.' };
-        }
-        return { tier: firstArg, name: nameMatch[1], totalSlots };
-    }
-
-    // Legacy: `"Name" 1.00 100`
     const nameMatch = content.match(/"([^"]+)"/);
     if (!nameMatch) {
-        return { error: 'Usage: `!pull <v|vmax> "Box Name" <total_slots>` (or legacy `!pull "Box Name" <price> <total_slots>`)' };
+        return { error: 'Usage: `/pull "Box Name" <total_slots>` (e.g. `/pull "Vintage Box" 50`)' };
     }
     const name = nameMatch[1];
     const afterQuote = content.slice(content.lastIndexOf('"') + 1).trim();
-    const numbers = afterQuote.match(/[\d]+(?:\.[\d]{1,2})?/g);
-    if (!numbers || numbers.length < 2) {
-        return { error: 'Legacy syntax needs price and slot count: `!pull "Name" 1.00 100`' };
+    const numbers = afterQuote.match(/[\d]+(?:\.[\d]{1,2})?/g) || [];
+
+    let priceCents = 500; // default $5
+    let totalSlots;
+
+    if (numbers.length === 1) {
+        // /pull "Name" <slots>
+        totalSlots = parseInt(numbers[0], 10);
+    } else if (numbers.length >= 2) {
+        // Legacy: /pull "Name" <price> <slots>
+        priceCents = Math.round(parseFloat(numbers[0]) * 100);
+        totalSlots = parseInt(numbers[1], 10);
+    } else {
+        return { error: 'Usage: `/pull "Box Name" <total_slots>` — total slots required.' };
     }
-    const priceCents = Math.round(parseFloat(numbers[0]) * 100);
-    const totalSlots = parseInt(numbers[1], 10);
-    const tier = priceCents === PRICE_CENTS_BY_TIER.v ? 'v'
-        : priceCents === PRICE_CENTS_BY_TIER.vmax ? 'vmax'
-        : null;
-    if (!tier) {
-        return { error: `Pull boxes only support $${(PRICE_CENTS_BY_TIER.v / 100).toFixed(2)} (v) and $${(PRICE_CENTS_BY_TIER.vmax / 100).toFixed(2)} (vmax) tiers. Use \`!pull v "Name" <slots>\` or \`!pull vmax "Name" <slots>\`.` };
-    }
+
     if (!Number.isFinite(totalSlots) || totalSlots < 1) {
         return { error: 'Total slots must be a positive integer.' };
     }
-    return { tier, name, totalSlots };
+    if (!Number.isFinite(priceCents) || priceCents < 1) {
+        return { error: 'Price must be a positive number.' };
+    }
+    return { name, totalSlots, priceCents };
 }
 
 // ===========================================================================
-// !pull close [tier]
+// /pull close
 // ===========================================================================
 
-async function handlePullClose(message, args) {
-    const tierArg = (args[0] || '').toLowerCase();
-    const targetTier = TIERS.includes(tierArg) ? tierArg : null;
-
-    let openBoxes;
+async function handlePullClose(message) {
+    let target;
     try {
-        openBoxes = await Promise.all(TIERS.map((t) => wpPullBox.getActiveBox(t)));
+        target = await wpPullBox.getActiveBox();
     } catch (e) {
         return message.reply(`Could not reach the pull-box service: ${e.message}`);
     }
-    const open = openBoxes.filter(Boolean);
 
-    if (open.length === 0) {
-        return message.reply('No active pull boxes to close.');
-    }
-
-    let target;
-    if (targetTier) {
-        target = open.find((b) => b.tier === targetTier);
-        if (!target) {
-            return message.reply(`No ${targetTier}-tier pull box is open.`);
-        }
-    } else if (open.length === 1) {
-        target = open[0];
-    } else {
-        return message.reply(`Two pull boxes are open. Specify which: \`!pull close ${open.map((b) => b.tier).join('|')}\``);
+    if (!target) {
+        return message.reply('No active pull box to close.');
     }
 
     try {
@@ -203,55 +169,32 @@ async function handlePullClose(message, args) {
         return message.reply(`Failed to close box: ${e.message}`);
     }
 
-    // Update embed to closed state
     await refreshBoxEmbed(target.id, { closed: true }).catch(() => {});
 
-    await message.channel.send(`🎰 ${target.tier.toUpperCase()}-tier pull box **${target.name}** closed.`);
+    await message.channel.send(`🎰 Pull box **${target.name}** closed.`);
 
     broadcastPullBoxClosed(target);
 }
 
 // ===========================================================================
-// !pull replenish [tier] N
+// /pull replenish N
 // ===========================================================================
 
 async function handlePullReplenish(message, args) {
-    const first = (args[0] || '').toLowerCase();
-    let tier = null;
-    let amountArg = args[0];
-
-    if (TIERS.includes(first)) {
-        tier = first;
-        amountArg = args[1];
-    }
-
-    const amount = parseInt(amountArg, 10);
+    const amount = parseInt(args[0], 10);
     if (!Number.isFinite(amount) || amount < 1) {
-        return message.reply('Usage: `!pull replenish [v|vmax] <slots-to-add>` — e.g. `!pull replenish v 50`');
-    }
-
-    let openBoxes;
-    try {
-        openBoxes = await Promise.all(TIERS.map((t) => wpPullBox.getActiveBox(t)));
-    } catch (e) {
-        return message.reply(`Could not reach the pull-box service: ${e.message}`);
-    }
-    const open = openBoxes.filter(Boolean);
-
-    if (open.length === 0) {
-        return message.reply('No active pull box to replenish.');
+        return message.reply('Usage: `/pull replenish <slots-to-add>` — e.g. `/pull replenish 25`');
     }
 
     let target;
-    if (tier) {
-        target = open.find((b) => b.tier === tier);
-        if (!target) {
-            return message.reply(`No ${tier}-tier pull box is open.`);
-        }
-    } else if (open.length === 1) {
-        target = open[0];
-    } else {
-        return message.reply(`Two pull boxes are open. Specify which: \`!pull replenish ${open.map((b) => b.tier).join('|')} ${amount}\``);
+    try {
+        target = await wpPullBox.getActiveBox();
+    } catch (e) {
+        return message.reply(`Could not reach the pull-box service: ${e.message}`);
+    }
+
+    if (!target) {
+        return message.reply('No active pull box to replenish.');
     }
 
     const newTotal = target.totalSlots + amount;
@@ -269,27 +212,23 @@ async function handlePullReplenish(message, args) {
 }
 
 // ===========================================================================
-// !pull status
+// /pull status
 // ===========================================================================
 
 async function handlePullStatus(message) {
-    let openBoxes;
+    let target;
     try {
-        openBoxes = await Promise.all(TIERS.map((t) => wpPullBox.getActiveBox(t)));
+        target = await wpPullBox.getActiveBox();
     } catch (e) {
         return message.reply(`Could not reach the pull-box service: ${e.message}`);
     }
-    const open = openBoxes.filter(Boolean);
 
-    if (open.length === 0) {
-        return message.reply('No active pull boxes.');
+    if (!target) {
+        return message.reply('No active pull box.');
     }
 
-    const lines = open.map((b) => {
-        const claimed = (b.claimedSlots || []).length;
-        return `🎰 **${b.tier.toUpperCase()}** — ${b.name} ($${(b.priceCents / 100).toFixed(2)}) — ${claimed}/${b.totalSlots} slots claimed`;
-    });
-    await message.reply(lines.join('\n'));
+    const claimed = (target.claimedSlots || []).length;
+    await message.reply(`🎰 **${target.name}** ($${(target.priceCents / 100).toFixed(2)}) — ${claimed}/${target.totalSlots} slots claimed`);
 }
 
 // ===========================================================================
@@ -315,8 +254,6 @@ function buildPullBoxEmbed(box, claimedSlots) {
 
     lines.push(`📦 **${claimedNumbers.size}/${box.totalSlots}** slots claimed${remaining > 0 && !isClosed ? ` — ${remaining} remaining` : ''}`);
 
-    // Compact slot grid: ⬜ open, 🟪 claimed. 10 per row. Capped at
-    // a sane size so we don't blow the embed character limit.
     if (box.totalSlots <= 200) {
         const rows = [];
         for (let i = 1; i <= box.totalSlots; i += 10) {
@@ -343,38 +280,24 @@ function buildPullBoxEmbed(box, claimedSlots) {
         .setTitle(`🎰 ${box.name}`)
         .setDescription(lines.join('\n'))
         .setColor(isClosed ? 0x95a5a6 : isFull ? 0xe74c3c : 0x9b59b6)
-        .setFooter({ text: `${box.tier.toUpperCase()}-tier pull box • ${box.totalSlots} slots` });
+        .setFooter({ text: `Pull box • ${box.totalSlots} slots` });
 }
 
 /**
- * Re-fetch a box from WP and edit its #card-shop embed in place.
- * Called after slot claims, replenish, and close events so the embed
- * stays current without depending on Nous's local state.
+ * Re-fetch the active box from WP and edit its #card-shop embed in
+ * place. Called after slot claims, replenish, and close events so the
+ * embed stays current without depending on Nous's local state.
  */
 async function refreshBoxEmbed(boxId, { closed = false } = {}) {
     try {
         const channel = getChannel('CARD_SHOP');
         if (!channel) return;
 
-        // We need the freshest version including claimed slots — easiest
-        // path is the activeBox lookup if it's still open, or a direct
-        // fetch otherwise. For simplicity, we just look up by tier once
-        // we know the tier. If we don't have it, skip.
-        // (For closed boxes the embed update happens once at close time.)
-        let boxRow = null;
-        for (const tier of TIERS) {
-            const candidate = await wpPullBox.getActiveBox(tier);
-            if (candidate && candidate.id === boxId) {
-                boxRow = candidate;
-                break;
-            }
-        }
-
-        if (!boxRow) {
-            // Box is closed — fall back to embed-only update
-            if (closed) {
-                // We still need a row to render; skip update if we can't find it.
-            }
+        const boxRow = await wpPullBox.getActiveBox();
+        if (!boxRow || boxRow.id !== boxId) {
+            // Either the box was closed or another box took its place.
+            // The closed-state embed update only matters when we still
+            // have a row to render — skip if not.
             return;
         }
 
@@ -387,7 +310,7 @@ async function refreshBoxEmbed(boxId, { closed = false } = {}) {
             ? [
                 new ActionRowBuilder().addComponents(
                     new ButtonBuilder()
-                        .setCustomId(`pull-buy-${boxRow.tier}`)
+                        .setCustomId('pull-buy')
                         .setLabel('Buy Pull(s)')
                         .setStyle(ButtonStyle.Primary)
                         .setEmoji('🎰'),
@@ -440,18 +363,8 @@ async function recordPullBoxPurchase({
     } else {
         // Discord path — auto-pick lowest open slots and claim them.
         try {
-            const box = await wpPullBox.getActiveBox(null); // Fall through; we'll fetch by id below if needed
-            // Simpler: just look up by tier — but we need tier. Fetch by id via active
-            // route is awkward; instead, ask both tiers and find the matching id.
-            let target = null;
-            for (const tier of ['v', 'vmax']) {
-                const candidate = await wpPullBox.getActiveBox(tier);
-                if (candidate && candidate.id === pullBoxId) {
-                    target = candidate;
-                    break;
-                }
-            }
-            if (!target) {
+            const target = await wpPullBox.getActiveBox();
+            if (!target || target.id !== pullBoxId) {
                 console.error(`Pull box #${pullBoxId} no longer active — Discord buyer ${discordUserId || customerEmail} payment landed but no claim made`);
                 await sendEmbed('OPS', {
                     title: '⚠️ Pull Box Closed Mid-Payment',
@@ -474,7 +387,7 @@ async function recordPullBoxPurchase({
                     description: `Box #${pullBoxId} oversold — only ${open.length} open slots but a Discord buyer paid for ${quantity}. Manual refund/claim needed.`,
                     color: 0xff0000,
                 });
-                quantity = open.length; // claim what we can
+                quantity = open.length;
             }
 
             const claimResp = await wpPullBox.claimSlots(target.id, open.slice(0, quantity), {
@@ -485,7 +398,6 @@ async function recordPullBoxPurchase({
             });
             claimedSlotNumbers = claimResp?.claimed || open.slice(0, quantity);
 
-            // Immediately confirm — no waiting for a separate webhook on a Discord-side claim
             await fetch(`${config.SITE_URL}/wp-json/shop/v1/pull-boxes/${target.id}/confirm-by-session`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-Bot-Secret': config.LIVESTREAM_SECRET },
@@ -497,7 +409,6 @@ async function recordPullBoxPurchase({
         }
     }
 
-    // Mirror the purchase into the unified queue as a single consolidated entry
     try {
         const activeQueue = await queueSource.getActiveQueue();
         if (activeQueue) {
@@ -536,7 +447,6 @@ async function recordPullBoxPurchase({
         console.error('Failed to mirror pull-box buy to queue:', e.message);
     }
 
-    // Refresh the on-stream embed
     await refreshBoxEmbed(pullBoxId).catch(() => {});
 }
 
@@ -545,10 +455,9 @@ async function recordPullBoxPurchase({
 // ===========================================================================
 
 /**
- * @deprecated Use recordPullBoxPurchase instead. Kept for backward compat
- * during the cutover; routes through the new system internally.
+ * @deprecated Use recordPullBoxPurchase instead.
  */
-async function recordPullPurchase(listingId, discordUserId = null, customerEmail = null, quantity = 1, stripeSessionId = null) {
+async function recordPullPurchase(_listingId, _discordUserId = null, _customerEmail = null, _quantity = 1, _stripeSessionId = null) {
     console.warn('recordPullPurchase (legacy) called — listing-based pull boxes are deprecated. Migrate caller to recordPullBoxPurchase.');
 }
 

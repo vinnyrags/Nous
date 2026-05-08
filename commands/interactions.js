@@ -56,9 +56,8 @@ async function handleButtonInteraction(interaction) {
         return handleHypeBuy(interaction, priceId);
     }
 
-    if (customId.startsWith('pull-buy-')) {
-        const tierOrLegacyId = customId.replace('pull-buy-', '');
-        return handlePullBuy(interaction, tierOrLegacyId);
+    if (customId === 'pull-buy') {
+        return handlePullBuy(interaction);
     }
 
     if (customId.startsWith('battle-buy-')) {
@@ -107,9 +106,8 @@ async function handleModalSubmit(interaction) {
     }
 
     // Pull-box buy modal (slot picker for Discord buyers)
-    if (interaction.customId.startsWith('pull-buy-modal-')) {
-        const tier = interaction.customId.replace('pull-buy-modal-', '');
-        return handlePullBuyModalSubmit(interaction, tier);
+    if (interaction.customId === 'pull-buy-modal') {
+        return handlePullBuyModalSubmit(interaction);
     }
 
     // Email linking modal (welcome channel)
@@ -345,27 +343,16 @@ async function handleGiveawayButton(interaction, giveawayId) {
 /**
  * Pull box button handler — same as card buy but allows 'pull' status.
  */
-async function handlePullBuy(interaction, tier) {
-    // Tier-based: resolve the active pull box for the requested tier
-    // via WP. The legacy `pull-buy-<listingId>` customId path is gone —
-    // any old embeds still showing that button will hit the not-found
-    // branch below since `1234` is not a valid tier.
-    if (tier !== 'v' && tier !== 'vmax') {
-        return interaction.reply({
-            content: 'This pull-box embed is from a previous run and no longer routes anywhere. Run `!pull v|vmax "Name" <slots>` to open a new box.',
-            ephemeral: true,
-        });
-    }
-
+async function handlePullBuy(interaction) {
     let box;
     try {
-        box = await wpPullBox.getActiveBox(tier);
+        box = await wpPullBox.getActiveBox();
     } catch (e) {
         return interaction.reply({ content: `Pull-box service unreachable: ${e.message}`, ephemeral: true });
     }
 
     if (!box) {
-        return interaction.reply({ content: `No ${tier}-tier pull box is open right now.`, ephemeral: true });
+        return interaction.reply({ content: 'No pull box is open right now.', ephemeral: true });
     }
 
     const claimed = (box.claimedSlots || []).length;
@@ -379,7 +366,7 @@ async function handlePullBuy(interaction, tier) {
     // falls through to the existing auto-assign-lowest-open-slots flow
     // that the Stripe webhook handles after payment.
     const modal = new ModalBuilder()
-        .setCustomId(`pull-buy-modal-${tier}`)
+        .setCustomId('pull-buy-modal')
         .setTitle(`Buy from ${box.name}`.slice(0, 45));
 
     const qtyInput = new TextInputBuilder()
@@ -412,13 +399,9 @@ async function handlePullBuy(interaction, tier) {
  * which atomically pre-claims the slots and creates the Stripe session.
  * Replies with the checkout URL.
  */
-async function handlePullBuyModalSubmit(interaction, tier) {
+async function handlePullBuyModalSubmit(interaction) {
     const discordUserId = interaction.user.id;
     await interaction.deferReply({ ephemeral: true });
-
-    if (tier !== 'v' && tier !== 'vmax') {
-        return interaction.editReply({ content: 'Invalid tier.' });
-    }
 
     const qtyRaw = interaction.fields.getTextInputValue('quantity').trim();
     const slotsRaw = interaction.fields.getTextInputValue('slots').trim();
@@ -430,12 +413,12 @@ async function handlePullBuyModalSubmit(interaction, tier) {
 
     let box;
     try {
-        box = await wpPullBox.getActiveBox(tier);
+        box = await wpPullBox.getActiveBox();
     } catch (e) {
         return interaction.editReply({ content: `Pull-box service unreachable: ${e.message}` });
     }
     if (!box) {
-        return interaction.editReply({ content: `${tier}-tier box closed since you opened the modal.` });
+        return interaction.editReply({ content: 'Pull box closed since you opened the modal.' });
     }
     if (!box.stripePriceId) {
         return interaction.editReply({ content: 'Box not fully configured (no Stripe price). Contact a mod.' });
@@ -519,9 +502,9 @@ async function handlePullBuyModalSubmit(interaction, tier) {
     }
 
     // No slots specified — fall through to the existing auto-assign
-    // flow via the bot's /pull-box/checkout/:tier route. The Stripe
-    // webhook picks the lowest open slots after payment lands.
-    const checkoutUrl = buildCheckoutUrl(`pull-box/checkout/${tier}`, discordUserId);
+    // flow via the bot's /pull-box/checkout route. The Stripe webhook
+    // picks the lowest open slots after payment lands.
+    const checkoutUrl = buildCheckoutUrl('pull-box/checkout', discordUserId);
     return interaction.editReply({
         content: `🎰 **${box.name}** — auto-assigning ${quantity} slot${quantity === 1 ? '' : 's'}\n\n🛒 **[Complete checkout →](${checkoutUrl})**`,
     });

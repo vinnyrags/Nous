@@ -438,38 +438,35 @@ async function runCardNightFlow(testChannel) {
     // creates a row in WP's `pull_boxes` table (not local `card_listings`). These
     // steps exercise the current API and clean up after themselves.
     let pullBoxId = null;
-    results.push(await step('!pull v open', async () => {
-        const msg = buildTestMessage('!pull v "TEST Pull" 5', testChannel);
-        await handlePull(msg, ['v', '"TEST', 'Pull"', '5']);
-        const box = await wpPullBox.getActiveBox('v');
+    results.push(await step('/pull open', async () => {
+        const msg = buildTestMessage('/pull "TEST Pull" 5', testChannel);
+        await handlePull(msg, ['"TEST', 'Pull"', '5']);
+        const box = await wpPullBox.getActiveBox();
         if (!box) throw new Error('Pull box not created in WP');
-        if (box.tier !== 'v') throw new Error(`Wrong tier: ${box.tier}`);
         if (box.totalSlots !== 5) throw new Error(`Wrong slot count: ${box.totalSlots}`);
         pullBoxId = box.id;
     }));
 
-    results.push(await step('!pull v open refused when already active', async () => {
-        // The new API enforces "exactly one active box per tier" at the
-        // homepage modal layer; verify the bot rejects a duplicate open.
-        const msg = buildTestMessage('!pull v "TEST Pull Dup" 5', testChannel);
+    results.push(await step('/pull open refused when already active', async () => {
+        const msg = buildTestMessage('/pull "TEST Pull Dup" 5', testChannel);
         const replies = [];
         msg.reply = async (c) => { replies.push(typeof c === 'string' ? c : (c?.content || '')); };
-        await handlePull(msg, ['v', '"TEST', 'Pull', 'Dup"', '5']);
+        await handlePull(msg, ['"TEST', 'Pull', 'Dup"', '5']);
         if (!replies.some((r) => /already active/i.test(r))) {
             throw new Error(`Expected "already active" rejection, got: ${replies.join(' | ')}`);
         }
     }));
 
-    results.push(await step('!pull status', async () => {
-        const msg = buildTestMessage('!pull status', testChannel);
+    results.push(await step('/pull status', async () => {
+        const msg = buildTestMessage('/pull status', testChannel);
         await handlePull(msg, ['status']);
     }));
 
-    results.push(await step('!pull close v', async () => {
-        const msg = buildTestMessage('!pull close v', testChannel);
-        await handlePull(msg, ['close', 'v']);
-        const stillOpen = await wpPullBox.getActiveBox('v');
-        if (stillOpen) throw new Error(`V-tier box should be closed, still active: ${stillOpen.id}`);
+    results.push(await step('/pull close', async () => {
+        const msg = buildTestMessage('/pull close', testChannel);
+        await handlePull(msg, ['close']);
+        const stillOpen = await wpPullBox.getActiveBox();
+        if (stillOpen) throw new Error(`Pull box should be closed, still active: ${stillOpen.id}`);
     }));
 
     // --- MANUAL OVERRIDE ---

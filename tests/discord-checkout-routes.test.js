@@ -238,82 +238,72 @@ describe('GET /battle/checkout/:id', () => {
 });
 
 // =========================================================================
-// /pull-box/checkout/:tier
+// /pull-box/checkout
 // =========================================================================
 
-describe('GET /pull-box/checkout/:tier', () => {
-    it('redirects to a Stripe session for an active V-tier box', async () => {
+describe('GET /pull-box/checkout', () => {
+    it('redirects to a Stripe session for the active box', async () => {
         mockGetActiveBox.mockResolvedValueOnce({
             id: 4,
-            tier: 'v',
-            stripePriceId: 'price_v_box',
-            totalSlots: 100,
+            stripePriceId: 'price_pull_box',
+            totalSlots: 50,
             claimedSlots: [],
         });
 
-        const res = await request(app).get('/pull-box/checkout/v?user=user_alpha');
+        const res = await request(app).get('/pull-box/checkout?user=user_alpha');
 
         expect(res.status).toBe(303);
         const params = mockSessionsCreate.mock.calls[0][0];
-        expect(params.line_items[0].price).toBe('price_v_box');
+        expect(params.line_items[0].price).toBe('price_pull_box');
         expect(params.metadata).toMatchObject({
             source: 'pull_box',
             pull_box_id: '4',
-            tier: 'v',
         });
+        expect(params.metadata.tier).toBeUndefined();
     });
 
-    it('rejects unknown tiers with 400', async () => {
-        const res = await request(app).get('/pull-box/checkout/legendary');
-        expect(res.status).toBe(400);
-        expect(mockSessionsCreate).not.toHaveBeenCalled();
-    });
-
-    it('404s when no box is open for the tier', async () => {
+    it('404s when no box is open', async () => {
         mockGetActiveBox.mockResolvedValueOnce(null);
-        const res = await request(app).get('/pull-box/checkout/vmax');
+        const res = await request(app).get('/pull-box/checkout');
         expect(res.status).toBe(404);
     });
 
     it('503s when the box has no stripe_price_id configured (ACF gap)', async () => {
         mockGetActiveBox.mockResolvedValueOnce({
             id: 4,
-            tier: 'v',
             stripePriceId: null,
-            totalSlots: 100,
+            totalSlots: 50,
             claimedSlots: [],
         });
 
-        const res = await request(app).get('/pull-box/checkout/v');
+        const res = await request(app).get('/pull-box/checkout');
         expect(res.status).toBe(503);
     });
 
     it('caps adjustable_quantity.maximum at remaining slots', async () => {
         mockGetActiveBox.mockResolvedValueOnce({
             id: 4,
-            tier: 'v',
-            stripePriceId: 'price_v',
-            totalSlots: 100,
-            claimedSlots: Array.from({ length: 95 }, (_, i) => ({ slotNumber: i + 1 })),
+            stripePriceId: 'price_pull_box',
+            totalSlots: 50,
+            claimedSlots: Array.from({ length: 45 }, (_, i) => ({ slotNumber: i + 1 })),
         });
 
-        await request(app).get('/pull-box/checkout/v');
+        await request(app).get('/pull-box/checkout');
 
         const params = mockSessionsCreate.mock.calls[0][0];
-        // 100 total - 95 claimed = 5 remaining; min(20, 5) = 5
+        // 50 total - 45 claimed = 5 remaining; min(20, 5) = 5
         expect(params.line_items[0].adjustable_quantity.maximum).toBe(5);
     });
 
     it('409s when the box is sold out', async () => {
         mockGetActiveBox.mockResolvedValueOnce({
             id: 4,
-            tier: 'v',
-            stripePriceId: 'price_v',
-            totalSlots: 100,
-            claimedSlots: Array.from({ length: 100 }, (_, i) => ({ slotNumber: i + 1 })),
+            stripePriceId: 'price_pull_box',
+            totalSlots: 50,
+            claimedSlots: Array.from({ length: 50 }, (_, i) => ({ slotNumber: i + 1 })),
         });
 
-        const res = await request(app).get('/pull-box/checkout/v');
+        const res = await request(app).get('/pull-box/checkout');
         expect(res.status).toBe(409);
         expect(mockSessionsCreate).not.toHaveBeenCalled();
     });
