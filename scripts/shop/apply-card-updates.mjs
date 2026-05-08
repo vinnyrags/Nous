@@ -61,27 +61,115 @@ function parseUpdates(text) {
 }
 
 /**
- * "Light Toxtricity #SWSH137 — SWSH: Sword & Shield Promo Cards (bump to 3)"
- * "Onix GX — Hidden Fates (bump to 2)"  (no #NUMBER)
- * "Mimikyu (Delta Species) #SWSH136 — SWSH: Sword & Shield Promo Cards (bump to 3)"
- *   → name="Mimikyu", variant="Delta Species" (variants live in col K)
+ * Two formats supported:
+ *
+ * 1. Em-dash form (original):
+ *      "Light Toxtricity #SWSH137 — SWSH: Sword & Shield Promo Cards (bump to 3)"
+ *      "Onix GX — Hidden Fates (bump to 2)"
+ *      "Mimikyu (Delta Species) #SWSH136 — SWSH: ... (bump to 3)"
+ *
+ * 2. Vintage-natural form (matches operator's freehand style for WOTC sets):
+ *      "Switch Base Set 95/102 (increase stock by 1)"
+ *      "Eevee Jungle 51/64 (increase stock by 1, and change price to $20)"
+ *      "Switch Base Set 95/102 (update stock to 2)"
+ *      "Drowzee Team Rocket 54/82 First Edition (bump to 3)"
+ *
+ *    Same vintage-set-inline + slash-number tokenization used by
+ *    parseNewCard. "increase stock by N" is incremental (resolved
+ *    against the current sheet value at apply time); "update stock
+ *    to N" / "bump to N" are absolute.
+ *
+ * Returns:
+ *   { name, variant, number, setName,
+ *     stockOp: { type: 'absolute' | 'delta', value: Int },
+ *     newPrice: '$X' | null }
  */
 function parseStockBump(line) {
-  const m = line.match(/^(.+?)(?:\s+#(\S+))?\s+—\s+(.+?)\s+\(bump to (\d+)\)$/);
-  if (!m) return null;
-  let name = m[1].trim();
-  let variant = '';
-  const variantMatch = name.match(/^(.+?)\s+\(([^)]+)\)$/);
-  if (variantMatch) {
-    name = variantMatch[1].trim();
-    variant = variantMatch[2].trim();
+  // Try em-dash form first (cheap regex; bail to natural form if no match).
+  const oldM = line.match(/^(.+?)(?:\s+#(\S+))?\s+—\s+(.+?)\s+\((bump to|update stock to) (\d+)\)$/);
+  if (oldM) {
+    let name = oldM[1].trim();
+    let variant = '';
+    const variantMatch = name.match(/^(.+?)\s+\(([^)]+)\)$/);
+    if (variantMatch) {
+      name = variantMatch[1].trim();
+      variant = variantMatch[2].trim();
+    }
+    return {
+      name,
+      variant,
+      number: (oldM[2] || '').trim(),
+      setName: oldM[3].trim(),
+      stockOp: { type: 'absolute', value: parseInt(oldM[5], 10) },
+      newPrice: null,
+    };
   }
+
+  // Vintage-natural form: shares the trailing-paren + vintage-set + number
+  // tokenization with parseNewCard.
+  const trail = line.match(/\(([^)]+)\)\s*$/);
+  if (!trail) return null;
+  const head = line.slice(0, trail.index).trim();
+  const body = trail[1];
+
+  let stockOp = null;
+  let newPrice = null;
+  for (const part of body.split(',').map((s) => s.trim())) {
+    let m;
+    m = part.match(/^(?:and\s+)?increase stock by (\d+)$/i);
+    if (m) { stockOp = { type: 'delta', value: parseInt(m[1], 10) }; continue; }
+    m = part.match(/^(?:and\s+)?(?:update stock to|bump to) (\d+)$/i);
+    if (m) { stockOp = { type: 'absolute', value: parseInt(m[1], 10) }; continue; }
+    m = part.match(/^(?:and\s+)?change price to \$?(\d+(?:\.\d+)?)$/i);
+    if (m) { newPrice = `$${m[1]}`; continue; }
+  }
+  if (!stockOp) return null;
+
+  // Now parse name + (optional First Edition variant) + (optional vintage
+  // set) + number from `head`. Same logic as parseNewCard.
+  let rest = head;
+  let variant = '';
+  if (/\bFirst Edition\b/i.test(rest)) {
+    variant = 'First Edition';
+    rest = rest.replace(/\s+First Edition\s*/i, ' ').trim();
+  }
+
+  let setName = '';
+  for (const set of VINTAGE_SET_NAMES) {
+    const setRegex = new RegExp(`\\s+${set.replace(/\s+/g, '\\s+')}(?=\\s+\\d|\\s*$)`, 'i');
+    const m = rest.match(setRegex);
+    if (m) {
+      setName = set;
+      rest = rest.slice(0, m.index).trim() + ' ' + rest.slice(m.index + m[0].length);
+      rest = rest.trim();
+      break;
+    }
+  }
+
+  let cardNumber = '';
+  const slashMatch = rest.match(/\s+([A-Za-z0-9]+\/[A-Za-z0-9]+)$/);
+  if (slashMatch) {
+    cardNumber = slashMatch[1].replace(/SSV/g, 'SV');
+    rest = rest.slice(0, slashMatch.index).trim();
+  } else {
+    const twoToken = rest.match(/\s+([A-Za-z]+(?:\s+[a-z]+)?)\s+(\d+)$/);
+    const singleToken = rest.match(/\s+([A-Z]+\d+)$/);
+    if (twoToken) {
+      cardNumber = twoToken[2];
+      rest = rest.slice(0, twoToken.index).trim();
+    } else if (singleToken) {
+      cardNumber = singleToken[1];
+      rest = rest.slice(0, singleToken.index).trim();
+    }
+  }
+
   return {
-    name,
+    name: rest,
     variant,
-    number: (m[2] || '').trim(),
-    setName: m[3].trim(),
-    stock: parseInt(m[4], 10),
+    number: cardNumber,
+    setName,
+    stockOp,
+    newPrice,
   };
 }
 
@@ -100,6 +188,26 @@ function parseRemoval(line) {
 }
 
 /**
+ * Vintage WOTC set names (1999-2000 era). Operator commonly drops the
+ * set name inline between card name and number, e.g.:
+ *   "Omanyte Fossil 52/62 (price $10)"
+ *   "Energy Retrieval Base Set 2 110/130 (price $10)"
+ *   "Charmander Team Rocket 50/82 (price $15)"
+ *
+ * Listed longest-first so multi-word sets ("Base Set 2") win over
+ * shorter prefixes ("Base Set") during regex match.
+ */
+const VINTAGE_SET_NAMES = [
+  'Base Set 2',
+  'Gym Challenge',
+  'Gym Heroes',
+  'Team Rocket',
+  'Base Set',
+  'Jungle',
+  'Fossil',
+];
+
+/**
  * Free-form name + optional number/set + price + optional stock.
  * Examples:
  *   "Volcanion EX 107/114 (price $15)"
@@ -109,8 +217,13 @@ function parseRemoval(line) {
  *   "Detective Pikachu SM190 ($10)"
  *   "Quagsire SV10/SV94 (price $25, stock: 3)"
  *   "Kartana SV33/SSV94 (price $10)"   ← SSV94 → SV94
+ *   "Omanyte Fossil 52/62 (price $10)" ← vintage set name inline → col I
+ *   "Koffing Team Rocket 58/82 First Edition (price $20)" ← variant → col K
  */
 function parseNewCard(line) {
+  // 0. Normalize known typos before any tokenization.
+  line = line.replace(/Team Tocket/gi, 'Team Rocket');
+
   // 1. Strip + parse trailing "(...)" pricing block
   const trail = line.match(/\(([^)]+)\)\s*$/);
   if (!trail) return null;
@@ -130,9 +243,31 @@ function parseNewCard(line) {
   // 2. Drop a trailing "Promo" / "promo"
   let rest = head.replace(/\s+promo$/i, '').trim();
 
+  // 2b. Extract a "First Edition" variant marker (col K).
+  let variant = '';
+  if (/\bFirst Edition\b/i.test(rest)) {
+    variant = 'First Edition';
+    rest = rest.replace(/\s+First Edition\s*/i, ' ').trim();
+  }
+
+  // 2c. Extract a vintage WOTC set name inline (between card name and
+  //     number). Captured to setName for col I; the regex strips it
+  //     out of `rest` so step 3 can extract the numeric tail cleanly.
+  let setName = '';
+  for (const set of VINTAGE_SET_NAMES) {
+    const setRegex = new RegExp(`\\s+${set.replace(/\s+/g, '\\s+')}(?=\\s+\\d|\\s*$)`, 'i');
+    const m = rest.match(setRegex);
+    if (m) {
+      setName = set;
+      rest = rest.slice(0, m.index).trim() + ' ' + rest.slice(m.index + m[0].length);
+      rest = rest.trim();
+      break;
+    }
+  }
+
   // 3. Extract card number / set tokens from the right.
   //    Cases handled (right-to-left):
-  //      a) "<a>/<b>"           e.g., "107/114" or "SV10/SV94"
+  //      a) "<a>/<b>"           e.g., "107/114" or "SV10/SV94" or "52/62"
   //      b) two-token "X N" where X is uppercase code with optional
   //         lowercase suffix and N is digits — "SVP en 013", "SVPEN 027",
   //         "SVPen 014"
@@ -169,7 +304,7 @@ function parseNewCard(line) {
     }
   }
 
-  return { name: rest, cardNumber, setCode, price, stock };
+  return { name: rest, setName, variant, cardNumber, setCode, price, stock };
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +370,7 @@ async function main() {
 
   // ─── Update Stock ────────────────────────────────────────────────────────
   console.log(`=== Update Stock (planned) ===`);
-  const stockOps = []; // { rowNumber: 1-indexed sheet row, newStock }
+  const stockOps = []; // { rowNumber, newStock, newPrice? }
   let stockUnmatched = 0;
   let stockAmbiguous = 0;
   for (const line of sections['Update Stock']) {
@@ -255,8 +390,23 @@ async function main() {
     } else {
       const m = matches[0];
       const sheetRow = m.index + 2;
-      stockOps.push({ rowNumber: sheetRow, newStock: target.stock });
-      if (VERBOSE) console.log(`  ✓ row ${sheetRow}: ${m.name} → stock ${target.stock}`);
+      // Resolve delta against the current sheet value. Strip non-digit
+      // chars so any stray formatting in col F can't poison the math.
+      const currentRaw = (rows[m.index][5] || '0').toString();
+      const currentStock = parseInt(currentRaw.replace(/[^0-9-]/g, ''), 10) || 0;
+      const newStock = target.stockOp.type === 'delta'
+        ? currentStock + target.stockOp.value
+        : target.stockOp.value;
+
+      stockOps.push({ rowNumber: sheetRow, newStock, newPrice: target.newPrice });
+
+      if (VERBOSE) {
+        const stockNote = target.stockOp.type === 'delta'
+          ? `stock ${currentStock} → ${newStock} (+${target.stockOp.value})`
+          : `stock → ${newStock}`;
+        const priceNote = target.newPrice ? `, price → ${target.newPrice}` : '';
+        console.log(`  ✓ row ${sheetRow}: ${m.name} | ${stockNote}${priceNote}`);
+      }
     }
   }
   console.log(`  Total: ${stockOps.length} matched, ${stockUnmatched} unmatched, ${stockAmbiguous} ambiguous\n`);
@@ -301,9 +451,11 @@ async function main() {
     row[4] = parsed.price;       // E
     row[5] = String(parsed.stock); // F
     row[7] = parsed.cardNumber;  // H
+    row[8] = parsed.setName;     // I (operator-provided vintage hint)
     row[9] = parsed.setCode;     // J
+    row[10] = parsed.variant;    // K (e.g., "First Edition")
     newRows.push(row);
-    console.log(`  ✓ ${parsed.name.padEnd(35)} | num=${parsed.cardNumber.padEnd(10)} | code=${parsed.setCode.padEnd(10)} | price=${parsed.price.padEnd(6)} | stock=${parsed.stock}`);
+    console.log(`  ✓ ${parsed.name.padEnd(28)} | num=${parsed.cardNumber.padEnd(8)} | set=${(parsed.setName || '').padEnd(14)} | variant=${(parsed.variant || '').padEnd(14)} | price=${parsed.price.padEnd(5)} | stock=${parsed.stock}`);
   }
   console.log(`  Total: ${newRows.length} to append, ${newUnparsed} unparseable\n`);
 
@@ -315,19 +467,28 @@ async function main() {
   // ─── EXECUTE ─────────────────────────────────────────────────────────────
   console.log(`🚀 APPLYING changes...\n`);
 
-  // 1) Stock updates — batch update column F by row number.
+  // 1) Stock updates — batch update column F by row number, plus optional
+  //    price (col E) when an "and change price to $X" clause was parsed.
   if (stockOps.length) {
+    const data = [];
+    for (const op of stockOps) {
+      data.push({
+        range: `${SHEET_NAME}!F${op.rowNumber}`,
+        values: [[String(op.newStock)]],
+      });
+      if (op.newPrice) {
+        data.push({
+          range: `${SHEET_NAME}!E${op.rowNumber}`,
+          values: [[op.newPrice]],
+        });
+      }
+    }
     await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        valueInputOption: 'RAW',
-        data: stockOps.map((op) => ({
-          range: `${SHEET_NAME}!F${op.rowNumber}`,
-          values: [[String(op.newStock)]],
-        })),
-      },
+      requestBody: { valueInputOption: 'RAW', data },
     });
-    console.log(`  ✓ Updated stock on ${stockOps.length} row(s).`);
+    const priceCount = stockOps.filter((op) => op.newPrice).length;
+    console.log(`  ✓ Updated stock on ${stockOps.length} row(s)${priceCount ? `, including ${priceCount} price change(s)` : ''}.`);
   }
 
   // 2) Append new cards as a contiguous block at the bottom.
