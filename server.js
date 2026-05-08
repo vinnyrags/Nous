@@ -24,7 +24,6 @@ import { propagateRefund } from './lib/refund-propagator.js';
 import { handleRefundEvent, handleDisputeEvent } from './lib/refund-bridge.js';
 import { handleTwitchWebhook } from './webhooks/twitch.js';
 import { handleShippingEasyWebhook } from './webhooks/shippingeasy.js';
-import { handleCardRequestCritical, handleCardRequestNotifications } from './webhooks/card-request.js';
 import { createLimiter } from './webhook-limiter.js';
 import { addClient, broadcast as broadcastQueue, clientCount } from './lib/queue-broadcaster.js';
 
@@ -232,33 +231,10 @@ app.post('/webhooks/twitch', express.json({
 app.post('/webhooks/shippingeasy', express.json(), handleShippingEasyWebhook);
 
 // =========================================================================
-// Card view request — WordPress pings us when a shopper queues a card
-// =========================================================================
-
-app.post('/webhooks/card-request-notify', express.json(), async (req, res) => {
-    const providedSecret = req.get('X-Bot-Secret') || '';
-    if (config.LIVESTREAM_SECRET && providedSecret !== config.LIVESTREAM_SECRET) {
-        return res.sendStatus(403);
-    }
-
-    try {
-        const context = await webhookLimit(() => handleCardRequestCritical(req.body));
-        res.sendStatus(200);
-
-        if (context) {
-            handleCardRequestNotifications(req.body, context).catch((e) =>
-                console.error('Card request notification error:', e.message),
-            );
-        }
-    } catch (e) {
-        console.error('Card request webhook error:', e.message);
-        res.sendStatus(200);
-    }
-});
-
-// =========================================================================
 // Live queue — WP fires `queue.changed` events; we relay them to all
 // connected SSE clients (the itzenzo.tv homepage LIVE QUEUE section).
+// RTS card-view requests are queue entries (`type=rts`) and arrive on the
+// same channel as orders/pack-battles/pull-boxes — no separate webhook.
 // =========================================================================
 
 app.post('/webhooks/queue-changed', express.json({ limit: '256kb' }), (req, res) => {

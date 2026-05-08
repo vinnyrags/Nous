@@ -108,24 +108,6 @@ const messages = [
         color: 0xceff00,
     },
 
-    // Message 5b: Card Catalog Requests
-    {
-        title: '🗃️ Card Catalog Requests',
-        description: [
-            'Shoppers hit **Request to See on Stream** on any card at itzenzo.tv/cards. Their request lands in `#ops` as a new embed and lives in the WordPress `wp_card_view_requests` table.',
-            '',
-            '**`/requests mode:<pending|all|recent>`** — List card requests. Default is `pending`.',
-            '',
-            '**`/request action:<next|shown|skip> [id:<int>]`** — Act on a single request:',
-            '> `/request action:next` — show the oldest pending request (no id needed)',
-            '> `/request action:shown id:42` — mark request 42 shown after you feature it',
-            '> `/request action:skip id:42` — skip (sold out, bad match, etc.)',
-            '',
-            '*Request rows are for catalog cards. Ad-hoc graded/vintage sales still go through `/sell` / `/list`.*',
-        ].join('\n'),
-        color: 0xceff00,
-    },
-
     // Message 6: Giveaways
     {
         title: '🎁 Giveaways',

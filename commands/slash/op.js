@@ -36,7 +36,6 @@ import { handleNous } from '../nous.js';
 import { handlePull } from '../pull.js';
 import { handleTracking } from '../tracking.js';
 import { handleShipments } from '../shipments.js';
-import { handleRequests, handleRequest } from '../card-requests.js';
 
 // Map of command name → handler. Anything in this map is dispatchable
 // from /op. Native slash commands that supersede an entry here should
@@ -69,8 +68,6 @@ const ROUTES = {
     tracking: handleTracking,
     shipments: handleShipments,
     'ship-status': (msg, args) => handleShipments(msg, ['status', ...(args || [])]),
-    requests: handleRequests,
-    request: handleRequest,
 };
 
 // Quoted-string-aware token splitter. `start "Hello World" 20` →

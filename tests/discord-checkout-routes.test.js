@@ -102,11 +102,6 @@ vi.mock('../webhooks/shippingeasy.js', () => ({
     handleShippingEasyWebhook: vi.fn(),
 }));
 
-vi.mock('../webhooks/card-request.js', () => ({
-    handleCardRequestCritical: vi.fn(),
-    handleCardRequestNotifications: vi.fn(),
-}));
-
 vi.mock('../lib/refund-propagator.js', () => ({
     propagateRefund: vi.fn(),
 }));

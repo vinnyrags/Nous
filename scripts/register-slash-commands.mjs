@@ -283,32 +283,6 @@ const commands = [
         .setDefaultMemberPermissions(ADMIN_ONLY)
         .addBooleanOption((o) => o.setName('intl').setDescription('International batch')),
 
-    // /requests — list card requests
-    new SlashCommandBuilder()
-        .setName('requests')
-        .setDescription('List card requests')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addStringOption((o) => o.setName('mode').setDescription('Filter mode')
-            .addChoices(
-                { name: 'pending (default)', value: 'pending' },
-                { name: 'all', value: 'all' },
-                { name: 'recent', value: 'recent' },
-            )),
-
-    // /request — act on a single request
-    new SlashCommandBuilder()
-        .setName('request')
-        .setDescription('Act on a single card request')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addStringOption((o) => o.setName('action').setDescription('Action')
-            .setRequired(true)
-            .addChoices(
-                { name: 'next', value: 'next' },
-                { name: 'shown', value: 'shown' },
-                { name: 'skip', value: 'skip' },
-            ))
-        .addIntegerOption((o) => o.setName('id').setDescription('Request id (for shown/skip)')),
-
     // /sell — list a card for sale
     new SlashCommandBuilder()
         .setName('sell')

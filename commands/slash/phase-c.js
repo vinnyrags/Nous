@@ -23,7 +23,6 @@ import { handleRefund } from '../refund.js';
 import { handleNous } from '../nous.js';
 import { handleTracking } from '../tracking.js';
 import { handleShipments } from '../shipments.js';
-import { handleRequests, handleRequest } from '../card-requests.js';
 import { handleShipping } from '../shipping.js';
 import { handleLink } from '../link.js';
 
@@ -189,27 +188,6 @@ export const handleDroppedOffSlash = defineSlashCommand({
     argsBuilder: (i) => {
         const intl = i.options.getBoolean('intl');
         return intl ? ['intl'] : [];
-    },
-});
-
-// /requests — list card requests (mode: pending, all, recent)
-export const handleRequestsSlash = defineSlashCommand({
-    name: 'requests',
-    handler: handleRequests,
-    argsBuilder: (i) => {
-        const mode = i.options.getString('mode') || 'pending';
-        return [mode];
-    },
-});
-
-// /request — act on a single request: next, shown, skip
-export const handleRequestSlash = defineSlashCommand({
-    name: 'request',
-    handler: handleRequest,
-    argsBuilder: (i) => {
-        const action = i.options.getString('action', true);
-        const id = i.options.getInteger('id');
-        return id ? [action, String(id)] : [action];
     },
 });
 
