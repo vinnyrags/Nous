@@ -30,6 +30,7 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 const Stripe = require('stripe');
+const { detectMode } = require('../../lib/stripe-mode.cjs');
 
 const CREDENTIALS_PATH = path.join(process.env.HOME, '.config/google/sheets-credentials.json');
 const SPREADSHEET_ID = '1erx1dUZ9YIwpg5xbXP_OFrE4i1dV97RoE7M0rsv_JkM';
@@ -50,13 +51,33 @@ if (!STRIPE_KEY) {
     process.exit(1);
 }
 
+const STRIPE_MODE = detectMode(STRIPE_KEY);
+console.log(`Stripe mode: ${STRIPE_MODE.toUpperCase()}`);
+
 const stripe = new Stripe(STRIPE_KEY);
 
 const args = process.argv.slice(2);
 const CLEAN = args.includes('--clean');
+const ALLOW_LIVE_CLEAN = args.includes('--allow-live-clean');
 const DRY_RUN = args.includes('--dry-run');
 const LIMIT_ARG = args.find((a) => a.startsWith('--limit='));
 const LIMIT = LIMIT_ARG ? parseInt(LIMIT_ARG.split('=')[1], 10) : Infinity;
+
+// See push-products.js for context. --clean against live archives every
+// card product, breaking checkout for /cards/ until the re-push from
+// Sheets finishes. --dry-run is exempt because no Stripe writes happen.
+if (CLEAN && !DRY_RUN && STRIPE_MODE === 'live' && !ALLOW_LIVE_CLEAN) {
+    console.error('');
+    console.error('ABORT: --clean against LIVE Stripe is destructive.');
+    console.error('  Every active card product will be archived (Stripe blocks delete in');
+    console.error('  live mode for products with payment history). /cards/ checkout breaks');
+    console.error('  until the re-push from the Singles sheet completes.');
+    console.error('');
+    console.error('  If you really mean to do this, re-run with --allow-live-clean.');
+    console.error('  Use --dry-run first to preview.');
+    console.error('');
+    process.exit(2);
+}
 
 // Column indices for the A-T schema.
 const COL = {
@@ -79,14 +100,17 @@ function priceToCents(raw) {
 }
 
 /**
- * In test mode (sk_test_…) hard-delete prices+products so they vanish
- * from Stripe entirely — archived rows that linger get referenced by
- * cards in WordPress and silently kill checkout sessions weeks later.
- * Set STRIPE_DELETE_WHEN_REMOVING=false to fall back to the old archive
- * behavior (mandatory for live mode where Stripe blocks deletion of
- * anything with payment history).
+ * In test mode (sk_test_…) hard-delete prices+products by default so
+ * they vanish from Stripe entirely — archived rows that linger get
+ * referenced by cards in WordPress and silently kill checkout sessions
+ * weeks later. In live mode default to archive (Stripe blocks delete
+ * for anything with payment history). Override either way with
+ * STRIPE_DELETE_WHEN_REMOVING=true|false.
  */
-const DELETE_WHEN_REMOVING = (process.env.STRIPE_DELETE_WHEN_REMOVING ?? 'true').toLowerCase() !== 'false';
+const DELETE_WHEN_REMOVING = (
+    process.env.STRIPE_DELETE_WHEN_REMOVING
+    ?? (STRIPE_MODE === 'live' ? 'false' : 'true')
+).toLowerCase() !== 'false';
 
 async function removeProduct(product) {
     if (!DELETE_WHEN_REMOVING) {

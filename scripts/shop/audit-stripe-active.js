@@ -43,6 +43,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const Stripe = require('stripe');
+const { detectMode } = require('../../lib/stripe-mode.cjs');
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--apply');
@@ -76,6 +77,9 @@ if (!STRIPE_KEY) {
 
 const stripe = new Stripe(STRIPE_KEY);
 const log = (...a) => { if (!JSON_OUT) console.log(...a); };
+
+const STRIPE_MODE = detectMode(STRIPE_KEY);
+log(`Stripe mode: ${STRIPE_MODE.toUpperCase()}`);
 
 async function listInactiveProducts() {
     const inactive = [];

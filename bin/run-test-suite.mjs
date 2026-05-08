@@ -110,6 +110,26 @@ if (!process.env.STRIPE_SECRET_KEY) {
     process.env.STRIPE_SECRET_KEY = 'sk_test_critical_path_suite_dummy_no_real_calls';
 }
 
+// Refuse to run with a live-mode Stripe key. Most flows use
+// fakeCheckoutSession() and never hit Stripe, but commands/test.js does
+// one real `stripe.products.search` for the hype/battle flow — under a
+// live key that would query live catalog data and surface it in the test
+// guild. The test rig is supposed to be hermetic; pin .env.test to
+// sk_test_… (see .env.test.example) to keep it that way after
+// production switches to live mode.
+const { detectMode } = await import('../lib/stripe-mode.cjs');
+if (detectMode(process.env.STRIPE_SECRET_KEY) === 'live') {
+    console.error('');
+    console.error('ABORT: STRIPE_SECRET_KEY resolved to a LIVE-mode key.');
+    console.error('  The critical-path suite must run against TEST Stripe so it cannot');
+    console.error('  charge real customers or leak live catalog data into the test guild.');
+    console.error('  Pin a sk_test_… key in Nous/.env.test (gitignored) — that file is');
+    console.error('  layered on top of .env at startup, so it overrides whatever the bot');
+    console.error('  uses in production.');
+    console.error('');
+    process.exit(2);
+}
+
 // Isolate the SQLite database to a test-only file so the suite can wipe
 // tables without touching whatever data.db happens to be next to the
 // repo. Override with NOUS_TEST_DB_PATH if you need a specific file.
