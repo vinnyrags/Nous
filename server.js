@@ -26,6 +26,7 @@ import { handleTwitchWebhook } from './webhooks/twitch.js';
 import { handleShippingEasyWebhook } from './webhooks/shippingeasy.js';
 import { createLimiter } from './webhook-limiter.js';
 import { addClient, broadcast as broadcastQueue, clientCount } from './lib/queue-broadcaster.js';
+import { client as discordClient } from './discord.js';
 
 const webhookLimit = createLimiter(10);
 import {
@@ -280,6 +281,35 @@ app.post('/webhooks/activity-changed', express.json({ limit: '64kb' }), (req, re
     } catch (e) {
         console.error('activity-changed broadcast failed:', e.message);
         res.sendStatus(500);
+    }
+});
+
+// =========================================================================
+// Card offers — WP fires `card.offer_received` when a buyer submits the
+// /collection Make-an-Offer form. We DM the operator (with #ops fallback)
+// and broadcast an activity envelope for the homepage feed.
+// =========================================================================
+
+app.post('/webhooks/card-offer-received', express.json({ limit: '64kb' }), async (req, res) => {
+    const providedSecret = req.get('X-Bot-Secret') || '';
+    if (!config.LIVESTREAM_SECRET || providedSecret !== config.LIVESTREAM_SECRET) {
+        return res.sendStatus(403);
+    }
+
+    const { event, data } = req.body || {};
+    if (event !== 'card.offer_received' || !data) {
+        return res.sendStatus(400);
+    }
+
+    // Ack first, fan out async — same pattern as queue-changed. Discord
+    // API can be slow and we don't want to hold the WP socket open.
+    res.sendStatus(200);
+
+    try {
+        const { handleCardOffer } = await import('./handlers/cardOffer.js');
+        await handleCardOffer({ data, client: discordClient });
+    } catch (e) {
+        console.error('card-offer dispatch failed:', e.message);
     }
 });
 

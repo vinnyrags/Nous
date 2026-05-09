@@ -47,6 +47,11 @@ export default {
     SITE_URL: optional('SITE_URL', 'https://vincentragosta.io'),
     LIVESTREAM_SECRET: optional('LIVESTREAM_SECRET', 'itzenzo-live'),
 
+    // Operator Discord user ID for high-touch DMs (Make-an-Offer
+    // submissions, manual escalations). When unset, those flows fall
+    // back to posting in #ops only.
+    OPERATOR_DISCORD_ID: optional('OPERATOR_DISCORD_ID'),
+
     // Where queue data lives. 'sqlite' = local SQLite (legacy), 'wp' = WordPress
     // REST as source of truth. Switch via QUEUE_SOURCE env once shadow validation
     // passes (see Phase 6 cutover plan).
