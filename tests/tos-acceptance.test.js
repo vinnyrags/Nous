@@ -179,13 +179,13 @@ describe('metadataFor', () => {
 });
 
 describe('CURRENT_VERSION', () => {
-    it('matches the v1.1 string the WP + frontend constants use', () => {
+    it('matches the v1.2 string the WP + frontend constants use', () => {
         // Belt-and-braces pin: if a future contributor bumps this without
         // also updating itzenzo.tv/src/lib/terms.ts and WP-side
         // TouAcceptance::CURRENT_VERSION, the live gate-cadence story
         // breaks (one repo's CURRENT vs another's submitted). This test
         // is the canary — when you bump version, update it here too AND
         // bump both other places.
-        expect(CURRENT_VERSION).toBe('1.1');
+        expect(CURRENT_VERSION).toBe('1.2');
     });
 });
