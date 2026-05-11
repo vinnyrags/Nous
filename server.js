@@ -25,7 +25,7 @@ import { handleRefundEvent, handleDisputeEvent } from './lib/refund-bridge.js';
 import { handleTwitchWebhook } from './webhooks/twitch.js';
 import { handleShippingEasyWebhook } from './webhooks/shippingeasy.js';
 import { createLimiter } from './webhook-limiter.js';
-import { metadataFor as tosMetadataFor } from './lib/tos-acceptance.js';
+import { metadataFor as tosMetadataFor, CURRENT_VERSION as CURRENT_TOS_VERSION } from './lib/tos-acceptance.js';
 
 /**
  * Attach the buyer's ToS acceptance audit fields to a Stripe Checkout
@@ -415,6 +415,90 @@ app.get('/battle/checkout/:id', async (req, res) => {
     } catch (e) {
         console.error('Battle checkout error:', e.message);
         res.status(500).send('Checkout failed. Try again or purchase from the shop directly.');
+    }
+});
+
+// =========================================================================
+// Pack battle WEB buy-in — POST endpoint for itzenzo.tv homepage flow.
+// Mirrors the Discord GET /battle/checkout/:id flow but for buyers without
+// a Discord identity. Returns { url } JSON so the frontend can redirect.
+// ToS acceptance happens via the modal click on the homepage; we capture
+// the audit fields (version + timestamp + IP + UA) inline here since web
+// buyers don't have a tos_acceptances row to look up.
+// =========================================================================
+
+app.post('/web/battle/checkout', express.json(), async (req, res) => {
+    const battle = battles.getActiveBattle.get();
+
+    if (!battle || !battle.stripe_price_id) {
+        return res.status(404).json({
+            error: 'no_active_battle',
+            message: 'No active pack battle right now.',
+        });
+    }
+
+    const submittedVersion = String(req.body?.terms_version || '').trim();
+    if (!submittedVersion) {
+        return res.status(400).json({
+            error: 'terms_not_accepted',
+            message: 'Please accept the Terms of Service & Refund Policy before checking out.',
+        });
+    }
+    if (submittedVersion !== CURRENT_TOS_VERSION) {
+        return res.status(400).json({
+            error: 'terms_version_outdated',
+            message: `The Terms of Service have been updated since you opened the page. Refresh and re-accept the current version (v${CURRENT_TOS_VERSION}) to continue.`,
+            current_version: CURRENT_TOS_VERSION,
+            submitted: submittedVersion,
+        });
+    }
+
+    try {
+        const stripe = new Stripe(config.STRIPE_SECRET_KEY);
+
+        // Build web-buyer ToS audit fields on the fly. Same shape as
+        // the WP-side TouAcceptance::validate audit record so dispute
+        // defense looks identical regardless of buy surface.
+        const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+        const remoteIp = xff || req.socket?.remoteAddress || 'unknown';
+        const userAgent = String(req.headers['user-agent'] || 'unknown').slice(0, 500);
+        const tosMetadata = {
+            terms_version: CURRENT_TOS_VERSION,
+            terms_accepted_at: new Date().toISOString(),
+            terms_accepted_source: 'web',
+            terms_accepted_ip: remoteIp,
+            terms_accepted_ua: userAgent,
+        };
+
+        const params = {
+            mode: 'payment',
+            line_items: [{ price: battle.stripe_price_id, quantity: 1 }],
+            allow_promotion_codes: true,
+            success_url: `${config.SHOP_URL}/thank-you?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${config.SHOP_URL}/?cancelled=1`,
+            metadata: {
+                battle_id: String(battle.id),
+                source: 'pack-battle',
+                discord_user_id: '',
+                ...tosMetadata,
+            },
+            // Web buyers always get the Discord-username field (same as
+            // the Discord flow when no ?user= is supplied) so the bot
+            // can match their entry post-purchase if they have an account.
+            custom_fields: customFieldsFor(null),
+        };
+        params.payment_intent_data = {
+            metadata: { ...params.metadata },
+        };
+
+        const session = await stripe.checkout.sessions.create(params);
+        res.json({ url: session.url });
+    } catch (e) {
+        console.error('Web battle checkout error:', e.message);
+        res.status(500).json({
+            error: 'checkout_failed',
+            message: 'Could not start checkout. Try again in a moment.',
+        });
     }
 });
 
