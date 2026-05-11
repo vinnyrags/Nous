@@ -198,6 +198,21 @@ db.exec(`
         activated_at TEXT DEFAULT (datetime('now')),
         deactivated_at TEXT
     );
+
+    -- ToS acceptance log for Discord-flow purchases (Buy buttons in
+    -- #pack-battles, #card-shop, hype embeds, pull-box modal). One-
+    -- time-per-version: a buyer who accepts terms v1.1 once doesn't
+    -- see the gate again until TERMS_VERSION bumps. See
+    -- lib/tos-acceptance.js for the access layer.
+    CREATE TABLE IF NOT EXISTS discord_tos_acceptances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        discord_user_id TEXT NOT NULL,
+        terms_version TEXT NOT NULL,
+        accepted_at TEXT NOT NULL DEFAULT (datetime('now')),
+        source TEXT NOT NULL DEFAULT 'discord_button'
+    );
+    CREATE INDEX IF NOT EXISTS idx_tos_user_version
+        ON discord_tos_acceptances(discord_user_id, terms_version);
 `);
 
 // =========================================================================
@@ -1128,6 +1143,30 @@ const stripeEventStmts = {
     pruneOlderThan: db.prepare(`DELETE FROM processed_stripe_events WHERE received_at < datetime('now', ?)`),
 };
 
+const tosAcceptanceStmts = {
+    /** Does this Discord user have an acceptance row for this version? */
+    has: db.prepare(`
+        SELECT 1 FROM discord_tos_acceptances
+        WHERE discord_user_id = ? AND terms_version = ?
+        LIMIT 1
+    `),
+    /** Record a fresh acceptance. Multiple acceptances per user are fine
+     *  — we keep the full audit trail; the latest is used for metadata. */
+    insert: db.prepare(`
+        INSERT INTO discord_tos_acceptances (discord_user_id, terms_version, source)
+        VALUES (?, ?, ?)
+    `),
+    /** Get the most recent acceptance row for a user — used by
+     *  metadataFor() to attach the original accepted_at timestamp to
+     *  Stripe metadata, not the time of the actual purchase. */
+    getLatest: db.prepare(`
+        SELECT * FROM discord_tos_acceptances
+        WHERE discord_user_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+    `),
+};
+
 export {
     db,
     stmts as purchases,
@@ -1149,4 +1188,5 @@ export {
     pullEntryStmts as pullEntries,
     trackingStmts as tracking,
     stripeEventStmts as stripeEvents,
+    tosAcceptanceStmts as tosAcceptances,
 };

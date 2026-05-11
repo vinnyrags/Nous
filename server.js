@@ -25,6 +25,27 @@ import { handleRefundEvent, handleDisputeEvent } from './lib/refund-bridge.js';
 import { handleTwitchWebhook } from './webhooks/twitch.js';
 import { handleShippingEasyWebhook } from './webhooks/shippingeasy.js';
 import { createLimiter } from './webhook-limiter.js';
+import { metadataFor as tosMetadataFor } from './lib/tos-acceptance.js';
+
+/**
+ * Attach the buyer's ToS acceptance audit fields to a Stripe Checkout
+ * Session params object, and mirror the full metadata onto
+ * payment_intent_data.metadata so disputes filed against the
+ * PaymentIntent (which is where Stripe's dispute portal points)
+ * carry the same record the Session does. No-op for the audit fields
+ * when discordUserId is empty / has no acceptance row.
+ *
+ * Mutates and returns the params object.
+ */
+function applyTosMetadata(params, discordUserId) {
+    const tos = tosMetadataFor(discordUserId);
+    params.metadata = { ...(params.metadata || {}), ...tos };
+    params.payment_intent_data = {
+        ...(params.payment_intent_data || {}),
+        metadata: { ...params.metadata },
+    };
+    return params;
+}
 import { addClient, broadcast as broadcastQueue, clientCount } from './lib/queue-broadcaster.js';
 import { client as discordClient } from './discord.js';
 
@@ -379,6 +400,7 @@ app.get('/battle/checkout/:id', async (req, res) => {
         // No shipping on battle buy-in — only the winner gets shipped product.
         // Winner's shipping is handled after /battle winner declaration.
 
+        applyTosMetadata(params, discordUserId);
         const session = await stripe.checkout.sessions.create(params);
 
         res.redirect(303, session.url);
@@ -450,6 +472,7 @@ app.get('/card-shop/checkout/:listingId', async (req, res) => {
             params.shipping_address_collection = { allowed_countries: config.SHIPPING.COUNTRIES };
         }
 
+        applyTosMetadata(params, discordUserId);
         const session = await stripe.checkout.sessions.create(params);
 
         cardListings.setStripeSessionId.run(session.id, listing.id);
@@ -531,6 +554,7 @@ app.get('/pull-box/checkout', async (req, res) => {
             params.shipping_address_collection = { allowed_countries: config.SHIPPING.COUNTRIES };
         }
 
+        applyTosMetadata(params, discordUserId);
         const session = await stripe.checkout.sessions.create(params);
         res.redirect(303, session.url);
     } catch (e) {
@@ -577,6 +601,7 @@ app.get('/product/checkout/:priceId', async (req, res) => {
             params.shipping_address_collection = { allowed_countries: config.SHIPPING.COUNTRIES };
         }
 
+        applyTosMetadata(params, discordUserId);
         const session = await stripe.checkout.sessions.create(params);
 
         res.redirect(303, session.url);
@@ -606,7 +631,7 @@ app.get('/shipping/checkout', async (req, res) => {
 
     try {
         const stripe = new Stripe(config.STRIPE_SECRET_KEY);
-        const session = await stripe.checkout.sessions.create({
+        const params = {
             mode: 'payment',
             line_items: [
                 {
@@ -630,7 +655,9 @@ app.get('/shipping/checkout', async (req, res) => {
             },
             shipping_address_collection: { allowed_countries: config.SHIPPING.COUNTRIES },
             custom_fields: customFieldsFor(req.query.user),
-        });
+        };
+        applyTosMetadata(params, req.query.user);
+        const session = await stripe.checkout.sessions.create(params);
 
         res.redirect(303, session.url);
     } catch (e) {

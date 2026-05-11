@@ -17,10 +17,11 @@
  *   email-link-{context}  — email entry for unlinked buyers
  */
 
-import { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } from 'discord.js';
+import { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import Stripe from 'stripe';
 import config from '../config.js';
 import { purchases, cardListings, listSessions, battles, giveaways } from '../db.js';
+import { hasAccepted, record as recordTosAcceptance, CURRENT_VERSION as TOS_VERSION } from '../lib/tos-acceptance.js';
 import { startExpiryTimer, clearListingTtl, updateListingEmbed, updateListSessionEmbed } from './card-shop.js';
 import { handleGiveawayEntry } from './giveaway.js';
 import * as wpPullBox from '../lib/wp-pull-box.js';
@@ -41,10 +42,67 @@ import {
 const baseUrl = config.SHOP_URL.replace(/\/shop$/, '');
 
 /**
+ * Show the ephemeral "I agree to Terms" gate for a buyer who hasn't
+ * accepted the current TOS_VERSION yet. The "I agree" customId echoes
+ * the original Buy click's customId so the user can re-click Buy after
+ * accepting — no re-dispatch from the I-agree handler, just an ack +
+ * "click Buy again to continue" message. Simpler than mid-flow state.
+ */
+async function showTosGate(interaction, originalCustomId) {
+    const acceptButton = new ButtonBuilder()
+        .setCustomId(`tos-accept:${originalCustomId}`)
+        .setLabel(`✓ I agree to Terms v${TOS_VERSION}`)
+        .setStyle(ButtonStyle.Primary);
+    const cancelButton = new ButtonBuilder()
+        .setCustomId('tos-cancel')
+        .setLabel('Cancel')
+        .setStyle(ButtonStyle.Secondary);
+
+    return interaction.reply({
+        ephemeral: true,
+        content:
+            `🛡️ **Before your first purchase from itzenzoTTV**\n\n` +
+            `Please review and accept the Terms of Service & Refund Policy:\n` +
+            `<${config.SHOP_URL}/legal/terms>\n\n` +
+            `By clicking **I agree** you accept the current Terms (v${TOS_VERSION}). ` +
+            `Your acceptance is tied to your Discord account and we won't ask again ` +
+            `unless the terms materially change.`,
+        components: [
+            new ActionRowBuilder().addComponents(acceptButton, cancelButton),
+        ],
+    });
+}
+
+/**
  * Route button interactions by customId prefix.
  */
 async function handleButtonInteraction(interaction) {
     const customId = interaction.customId;
+
+    // ToS gate handlers come first — they intercept Buy clicks for
+    // unaccepted users and route them through the I-agree ephemeral
+    // before the original handler ever runs.
+    if (customId.startsWith('tos-accept:')) {
+        return handleTosAccept(interaction);
+    }
+    if (customId === 'tos-cancel') {
+        return interaction.update({
+            content: '✗ Cancelled. No purchase was made.',
+            components: [],
+        });
+    }
+
+    // Buy flows below all require an accepted ToS. Buyer who hasn't
+    // accepted CURRENT_VERSION sees the gate; everyone else proceeds.
+    const isBuyFlow =
+        customId.startsWith('card-buy-') ||
+        customId.startsWith('hype-buy-') ||
+        customId === 'pull-buy' ||
+        customId.startsWith('battle-buy-') ||
+        customId.startsWith('sell-buy-');
+    if (isBuyFlow && !hasAccepted(interaction.user.id)) {
+        return showTosGate(interaction, customId);
+    }
 
     if (customId.startsWith('card-buy-')) {
         const listingId = customId.replace('card-buy-', '');
@@ -172,6 +230,24 @@ function showEmailModal(interaction, contextPrefix) {
 function buildCheckoutUrl(path, discordUserId) {
     const url = `${baseUrl}/bot/${path}`;
     return discordUserId ? `${url}?user=${discordUserId}` : url;
+}
+
+/**
+ * Handle "I agree to Terms vX.X" click. Records the acceptance and
+ * asks the buyer to click their original Buy button again — the next
+ * click sees hasAccepted=true and proceeds normally. Simpler than
+ * trying to re-dispatch the original button click mid-interaction.
+ */
+async function handleTosAccept(interaction) {
+    recordTosAcceptance(interaction.user.id, 'discord_button');
+    return interaction.update({
+        content:
+            `✓ **Terms accepted (v${TOS_VERSION})** — thank you!\n\n` +
+            `Click the **Buy** button again on the original message to ` +
+            `continue with your purchase. We won't ask again unless the ` +
+            `terms materially change.`,
+        components: [],
+    });
 }
 
 /**

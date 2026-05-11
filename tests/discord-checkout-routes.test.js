@@ -143,6 +143,16 @@ vi.mock('../db.js', () => ({
     shipping: { record: { run: vi.fn() } },
     tracking: {},
     stripeEvents: { claimEvent: { run: vi.fn().mockReturnValue({ changes: 1 }) }, pruneOlderThan: { run: vi.fn() } },
+    // ToS-acceptance statements are consumed by lib/tos-acceptance.js
+    // (via server.js applyTosMetadata). Stubbed to "no acceptance on
+    // record" so the audit-fields merge is a no-op — these tests pin
+    // route SHAPE (line items, shipping, metadata structure), not ToS
+    // behavior (covered by tests/tos-acceptance.test.js).
+    tosAcceptances: {
+        has: { get: () => null },
+        insert: { run: () => {} },
+        getLatest: { get: () => null },
+    },
 }));
 
 // wp-pull-box dynamic-imported by /pull-box/checkout/:tier — mock here too
