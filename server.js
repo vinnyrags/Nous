@@ -394,7 +394,15 @@ app.get('/battle/checkout/:id', async (req, res) => {
         // Prefill email for linked buyers
         if (discordUserId) {
             const link = purchases.getEmailByDiscordId.get(discordUserId);
-            if (link) params.customer_email = link.customer_email;
+            if (link) {
+                params.customer_email = link.customer_email;
+                // Receipts to the buyer's address — fulfills the
+                // "you'll get a Stripe receipt for every purchase"
+                // claim on /how-it-works/buying. receipt_email is a
+                // separate Stripe field from customer_email; both
+                // need to be set for the prefill + receipt to flow.
+                params.receipt_email = link.customer_email;
+            }
         }
 
         // No shipping on battle buy-in — only the winner gets shipped product.
@@ -459,7 +467,15 @@ app.get('/card-shop/checkout/:listingId', async (req, res) => {
         // Prefill email for linked buyers
         if (discordUserId) {
             const link = purchases.getEmailByDiscordId.get(discordUserId);
-            if (link) params.customer_email = link.customer_email;
+            if (link) {
+                params.customer_email = link.customer_email;
+                // Receipts to the buyer's address — fulfills the
+                // "you'll get a Stripe receipt for every purchase"
+                // claim on /how-it-works/buying. receipt_email is a
+                // separate Stripe field from customer_email; both
+                // need to be set for the prefill + receipt to flow.
+                params.receipt_email = link.customer_email;
+            }
         }
 
         // Conditional shipping: skip if buyer already covered this period
@@ -545,7 +561,15 @@ app.get('/pull-box/checkout', async (req, res) => {
         // Prefill email for linked buyers
         if (discordUserId) {
             const link = purchases.getEmailByDiscordId.get(discordUserId);
-            if (link) params.customer_email = link.customer_email;
+            if (link) {
+                params.customer_email = link.customer_email;
+                // Receipts to the buyer's address — fulfills the
+                // "you'll get a Stripe receipt for every purchase"
+                // claim on /how-it-works/buying. receipt_email is a
+                // separate Stripe field from customer_email; both
+                // need to be set for the prefill + receipt to flow.
+                params.receipt_email = link.customer_email;
+            }
         }
 
         const covered = discordUserId ? hasShippingCoveredByDiscordId(discordUserId) : false;
@@ -588,7 +612,15 @@ app.get('/product/checkout/:priceId', async (req, res) => {
         // Prefill email for linked buyers
         if (discordUserId) {
             const link = purchases.getEmailByDiscordId.get(discordUserId);
-            if (link) params.customer_email = link.customer_email;
+            if (link) {
+                params.customer_email = link.customer_email;
+                // Receipts to the buyer's address — fulfills the
+                // "you'll get a Stripe receipt for every purchase"
+                // claim on /how-it-works/buying. receipt_email is a
+                // separate Stripe field from customer_email; both
+                // need to be set for the prefill + receipt to flow.
+                params.receipt_email = link.customer_email;
+            }
         }
 
         // Conditional shipping based on buyer identity
@@ -656,6 +688,15 @@ app.get('/shipping/checkout', async (req, res) => {
             shipping_address_collection: { allowed_countries: config.SHIPPING.COUNTRIES },
             custom_fields: customFieldsFor(req.query.user),
         };
+        // Prefill email + send receipt for linked buyers (matches the
+        // pattern in every other Stripe session.create above).
+        if (req.query.user) {
+            const link = purchases.getEmailByDiscordId.get(req.query.user);
+            if (link) {
+                params.customer_email = link.customer_email;
+                params.receipt_email = link.customer_email;
+            }
+        }
         applyTosMetadata(params, req.query.user);
         const session = await stripe.checkout.sessions.create(params);
 
