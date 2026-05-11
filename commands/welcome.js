@@ -14,8 +14,9 @@ function buildWelcomeEmbed() {
         .setTitle('Welcome to itzenzo.tv')
         .setDescription(
             'Cards. Games. Community. Welcome to the family.\n\n' +
-            'We run card nights **Monday through Thursday** — pack openings, pack battles, duck races, and more. ' +
-            'Gaming streams happen **Friday through Sunday**. Everything goes through Discord.'
+            'Card nights run **Monday, Tuesday, and Wednesday at 8PM EST** — Pokemon and anime, opened live, with pack battles, duck races, and pull boxes. ' +
+            'Gaming is informal — we play most days, timing varies, drop into the looking-for-group channel for whatever is running. ' +
+            '**After Dark** (18+) is coming soon. Yu-Gi-Oh inventory rolls in as it lands.'
         )
         .setColor(0xceff00)
         .addFields(
@@ -41,7 +42,7 @@ function buildWelcomeEmbed() {
                 value:
                     'Head to <#1488183429437853696> and react to get the **Xipe** role. ' +
                     'This unlocks full server access — giveaways, pack battles, pull boxes, community channels, and more. ' +
-                    'Once verified, check out <#1488041097153347704> to pick up additional roles like **Ena** for After Dark content.',
+                    'Once verified, check out <#1488041097153347704> to pick up additional roles. The **Ena** role gates After Dark content (coming soon — grab the role now to be ready when it launches).',
             },
             {
                 name: 'Role Progression',
@@ -50,7 +51,7 @@ function buildWelcomeEmbed() {
                     '**Long** — 5+ purchases (loyalty recognized)',
             },
         )
-        .setFooter({ text: 'itzenzo.tv — Cards. Games. After Dark.' });
+        .setFooter({ text: 'itzenzo.tv — Cards. Games. Community.' });
 }
 
 function buildWelcomeButton() {

@@ -178,8 +178,7 @@ async function handleHype(message, args) {
         .setTitle('🎬 Card Night Tonight!')
         .setDescription(
             `Going live tonight at **8 PM EST** on Twitch, YouTube, TikTok, and Instagram.\n\n` +
-            `We're kicking things off with Pokemon, rolling into anime, with pack battles in between and closing out with the duck race. ` +
-            `After Dark on Twitch + IG after that.\n\n` +
+            `We're kicking things off with Pokemon, rolling into anime, with pack battles in between and closing out with the duck race.\n\n` +
             `Here's what I've got my eye on tonight:\n\n` +
             productLines.join('\n\n') +
             `\n\n🛒 **[Browse the full shop](${config.SHOP_URL})**\n` +

@@ -53,8 +53,8 @@ function buildLfgEmbed() {
             {
                 name: 'Stream schedule',
                 value: [
-                    '**Mon–Thu** — Card nights, 8PM EST',
-                    '**Fri–Sun** — Gaming nights, 8PM EST',
+                    '**Mon, Tue, Wed** — Card nights at 8PM EST (Pokemon + anime)',
+                    '**Gaming** — informal, most days, varied timing — drop into this channel for whatever\'s running',
                     `See ${announcementsMention} for going-live alerts.`,
                 ].join('\n'),
             },

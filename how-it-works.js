@@ -14,7 +14,7 @@ const messages = [
     {
         title: '💳 How Payments & Shipping Work',
         description: [
-            'We sell sealed TCG product (Pokemon, anime, and more) through the shop at **itzenzo.tv**, plus hand-inspected raw singles in our [card catalog](https://itzenzo.tv/cards) — condition shown right on the listing.',
+            'We sell sealed TCG product (Pokemon, anime, and **Yu-Gi-Oh — coming soon**) through the shop at **itzenzo.tv**, plus hand-inspected raw singles in our [card catalog](https://itzenzo.tv/cards) — condition shown right on the listing.',
             '',
             'Here\'s exactly how everything works — buying, shipping, refunds, and what to expect at every step.',
             '',
