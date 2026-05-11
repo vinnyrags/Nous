@@ -711,16 +711,24 @@ app.get('/shipping/checkout', async (req, res) => {
 // Shipping status lookup — check if a buyer has shipping covered
 // =========================================================================
 
-app.get('/shipping/lookup', (req, res) => {
-    const email = req.query.email?.trim().toLowerCase();
-    if (!email) {
-        return res.status(400).json({ error: 'Missing email parameter' });
-    }
+/**
+ * Compute the shipping lookup result for a buyer's email. Shared
+ * between the GET /shipping/lookup status check and the POST
+ * /shipping/start-checkout flow so both surfaces apply the same
+ * coverage logic + rate selection.
+ *
+ * Coverage requires Discord-link verification on purpose — see the
+ * inline note on the `covered` line below. Returns null only if the
+ * email itself is empty/invalid; otherwise always returns a populated
+ * lookup object the caller can act on.
+ */
+function computeShippingLookup(email) {
+    if (!email) return null;
+    const normalized = email.trim().toLowerCase();
+    if (!normalized) return null;
 
-    const intl = isInternationalByEmail(email);
-
-    // Check if we know this email and whether their country is flagged
-    const link = purchases.getDiscordIdByEmail.get(email);
+    const intl = isInternationalByEmail(normalized);
+    const link = purchases.getDiscordIdByEmail.get(normalized);
     const known = !!link;
     const countryRow = link ? discordLinks.getCountry.get(link.discord_user_id) : null;
     const countryKnown = countryRow?.country != null;
@@ -732,12 +740,111 @@ app.get('/shipping/lookup', (req, res) => {
     // first place. Internal callers that already know the buyer's Discord
     // identity (webhooks, `/shipping`) use `hasShippingCoveredByDiscordId`
     // which keys on the Discord id, not the email, and so isn't affected.
-    const covered = known && hasShippingCovered(email);
+    const covered = known && hasShippingCovered(normalized);
 
     const rate = covered ? 0 : (intl ? config.SHIPPING.INTERNATIONAL : config.SHIPPING.DOMESTIC);
     const label = intl ? 'International Shipping' : 'Standard Shipping (US)';
 
-    res.json({ email, known, covered, international: intl, countryKnown, rate, label });
+    return { email: normalized, known, covered, international: intl, countryKnown, rate, label };
+}
+
+app.get('/shipping/lookup', (req, res) => {
+    const lookup = computeShippingLookup(req.query.email);
+    if (!lookup) {
+        return res.status(400).json({ error: 'Missing email parameter' });
+    }
+    res.json(lookup);
+});
+
+// =========================================================================
+// No-Discord shipping payment — buyer enters their email on itzenzo.tv,
+// we look up what they owe server-side (no URL-trusted amount), and
+// return either a "covered" message or a Stripe Checkout URL.
+//
+// Replaces the URL-trusting GET /shipping/checkout for non-Discord buyers.
+// The GET stays in place for backwards compat with the Discord-flow
+// settlement DMs (which already include the correct ?amount=).
+// =========================================================================
+
+app.post('/shipping/start-checkout', express.json(), async (req, res) => {
+    const email = (req.body?.email || '').trim().toLowerCase();
+    if (!email) {
+        return res.status(400).json({ error: 'Email is required.' });
+    }
+
+    const lookup = computeShippingLookup(email);
+    if (!lookup) {
+        return res.status(400).json({ error: 'Invalid email.' });
+    }
+
+    if (lookup.covered) {
+        return res.json({
+            status: 'covered',
+            message: "You're already covered for this period — nothing owed.",
+            international: lookup.international,
+        });
+    }
+
+    // Rate is computed server-side from getShippingLookup — never
+    // trust an amount passed by the client. This is the security
+    // upgrade vs the legacy GET /shipping/checkout, which accepts
+    // ?amount= from the URL.
+    const amountCents = lookup.rate * 100;
+    const reason = lookup.international
+        ? 'International Shipping (period coverage)'
+        : 'Standard Shipping (period coverage)';
+
+    try {
+        const stripe = new Stripe(config.STRIPE_SECRET_KEY);
+        const params = {
+            mode: 'payment',
+            line_items: [
+                {
+                    price_data: {
+                        currency: 'usd',
+                        product_data: {
+                            name: reason,
+                            description: `Shipping — $${(amountCents / 100).toFixed(2)}`,
+                        },
+                        unit_amount: amountCents,
+                    },
+                    quantity: 1,
+                },
+            ],
+            success_url: `${config.SHOP_URL}?shipping_paid=1`,
+            cancel_url: config.SHOP_URL,
+            metadata: {
+                source: 'web-shipping-payment',
+                buyer_email: email,
+            },
+            customer_email: email,
+            // Stripe-issued receipt regardless of Discord link state —
+            // the whole point of this flow is to serve buyers who
+            // don't use Discord.
+            receipt_email: email,
+            shipping_address_collection: { allowed_countries: config.SHIPPING.COUNTRIES },
+        };
+        // ToS audit fields — when called via the WP-side proxy, WP's
+        // TouAcceptance::validate has already verified terms_version
+        // and produced the audit array. We accept it from the request
+        // body and mirror to session.metadata + PI metadata. Internal
+        // direct callers (none today, but possible) can skip it; the
+        // session just won't carry the audit, which is fine for
+        // dispute defense — the buyer never paid without acknowledging.
+        const tosMetadata = (req.body?.tos_metadata && typeof req.body.tos_metadata === 'object')
+            ? req.body.tos_metadata
+            : null;
+        if (tosMetadata) {
+            params.metadata = { ...params.metadata, ...tosMetadata };
+            params.payment_intent_data = { metadata: { ...params.metadata } };
+        }
+        const session = await stripe.checkout.sessions.create(params);
+
+        res.json({ status: 'checkout', url: session.url, amount_cents: amountCents });
+    } catch (e) {
+        console.error('Web shipping checkout error:', e.message);
+        res.status(500).json({ error: 'Could not create checkout session. Try again.' });
+    }
 });
 
 // =========================================================================
