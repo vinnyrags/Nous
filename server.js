@@ -75,6 +75,43 @@ function customFieldsFor(discordUserId) {
     return discordUserId ? [] : [discordUsernameField];
 }
 
+/**
+ * Pre-flight check: probe that a stored Stripe price ID is retrievable
+ * AND active in the current mode. Mirrors the WP-side
+ * StripeService::findFirstInactivePriceId defense — without it, a
+ * battle row carrying a test-mode or archived price ID throws inside
+ * stripe.checkout.sessions.create, the buyer sees a generic error, and
+ * the actual cause is buried in catch logs.
+ *
+ * Returns null when OK, or `{ code, message }` when blocked.
+ */
+async function preflightPriceActive(stripe, priceId) {
+    try {
+        const price = await stripe.prices.retrieve(priceId, { expand: ['product'] });
+        if (!price.active) {
+            return { code: 'price_inactive', message: 'The pack-battle product is archived in Stripe.' };
+        }
+        if (price.product && typeof price.product !== 'string' && !price.product.active) {
+            return { code: 'product_inactive', message: 'The pack-battle product is archived in Stripe.' };
+        }
+        return null;
+    } catch (e) {
+        if (
+            e?.type === 'StripeInvalidRequestError' &&
+            /No such price/i.test(e?.message || '')
+        ) {
+            return {
+                code: 'price_not_found',
+                message: 'The pack-battle product is not available in this Stripe mode.',
+                detail: e.message,
+            };
+        }
+        // Network / auth / rate limit — let the main createCheckoutSession
+        // call surface the real error through its own catch.
+        return null;
+    }
+}
+
 // =========================================================================
 // Stripe webhook — needs raw body for signature verification
 // =========================================================================
@@ -377,6 +414,18 @@ app.get('/battle/checkout/:id', async (req, res) => {
     try {
         const stripe = new Stripe(config.STRIPE_SECRET_KEY);
 
+        // Pre-flight inactive-price check before any session work.
+        const preflight = await preflightPriceActive(stripe, battle.stripe_price_id);
+        if (preflight) {
+            console.error(
+                `Battle checkout pre-flight blocked: ${preflight.code} | priceId=${battle.stripe_price_id} | battleId=${battle.id}`,
+                preflight.detail || '',
+            );
+            return res
+                .status(503)
+                .send('This pack battle is not available right now — the operator has been notified.');
+        }
+
         const params = {
             mode: 'payment',
             line_items: [{ price: battle.stripe_price_id, quantity: 1 }],
@@ -413,7 +462,16 @@ app.get('/battle/checkout/:id', async (req, res) => {
 
         res.redirect(303, session.url);
     } catch (e) {
-        console.error('Battle checkout error:', e.message);
+        console.error(
+            `Battle checkout error: ${e?.constructor?.name || 'Error'}: ${e.message} | priceId=${battle.stripe_price_id} | battleId=${battle.id}`,
+        );
+        // Backstop for the inactive-price race (pre-flight passed but
+        // Stripe archived between then and now).
+        if (/No such price/i.test(e?.message || '')) {
+            return res
+                .status(503)
+                .send('This pack battle is not available right now — the operator has been notified.');
+        }
         res.status(500).send('Checkout failed. Try again or purchase from the shop directly.');
     }
 });
@@ -456,6 +514,20 @@ app.post('/web/battle/checkout', express.json(), async (req, res) => {
     try {
         const stripe = new Stripe(config.STRIPE_SECRET_KEY);
 
+        // Pre-flight inactive-price check before any session work.
+        const preflight = await preflightPriceActive(stripe, battle.stripe_price_id);
+        if (preflight) {
+            console.error(
+                `Web battle checkout pre-flight blocked: ${preflight.code} | priceId=${battle.stripe_price_id} | battleId=${battle.id}`,
+                preflight.detail || '',
+            );
+            return res.status(503).json({
+                error: 'battle_unavailable',
+                message: "This pack battle isn't available right now — the operator has been notified. Try again in a moment.",
+                priceId: battle.stripe_price_id,
+            });
+        }
+
         // Build web-buyer ToS audit fields on the fly. Same shape as
         // the WP-side TouAcceptance::validate audit record so dispute
         // defense looks identical regardless of buy surface.
@@ -494,10 +566,21 @@ app.post('/web/battle/checkout', express.json(), async (req, res) => {
         const session = await stripe.checkout.sessions.create(params);
         res.json({ url: session.url });
     } catch (e) {
-        console.error('Web battle checkout error:', e.message);
-        res.status(500).json({
+        console.error(
+            `Web battle checkout error: ${e?.constructor?.name || 'Error'}: ${e.message} | priceId=${battle.stripe_price_id} | battleId=${battle.id}`,
+        );
+        // Backstop for the inactive-price race (pre-flight passed but
+        // Stripe archived between then and now).
+        if (/No such price/i.test(e?.message || '')) {
+            return res.status(503).json({
+                error: 'battle_unavailable',
+                message: "This pack battle isn't available right now — the operator has been notified. Try again in a moment.",
+                priceId: battle.stripe_price_id,
+            });
+        }
+        res.status(502).json({
             error: 'checkout_failed',
-            message: 'Could not start checkout. Try again in a moment.',
+            message: 'Could not start checkout: ' + e.message,
         });
     }
 });
