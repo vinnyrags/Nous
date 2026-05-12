@@ -291,7 +291,20 @@ async function showDuckRace(message) {
     }
 
     const roster = uniqueBuyers.map((b, i) => {
-        const label = /^\d+$/.test(b.buyer) ? `<@${b.buyer}>` : b.buyer;
+        // The WP-side `uniqueBuyers` repository method now returns the
+        // best display key per buyer (discord_user_id → discord_handle →
+        // customer_email). Render the three shapes:
+        //   - all digits      → Discord user ID, ping with <@id>
+        //   - contains an '@' → email address, render as-is
+        //   - otherwise       → Discord handle, prefix with @
+        let label;
+        if (/^\d+$/.test(b.buyer)) {
+            label = `<@${b.buyer}>`;
+        } else if (b.buyer.includes('@')) {
+            label = b.buyer;
+        } else {
+            label = `@${b.buyer}`;
+        }
         return `${i + 1}. ${label}`;
     }).join('\n');
 
@@ -628,7 +641,20 @@ function buildQueueDescription(entries, uniqueBuyers) {
     });
 
     const roster = uniqueBuyers.map((b, i) => {
-        const label = /^\d+$/.test(b.buyer) ? `<@${b.buyer}>` : b.buyer;
+        // The WP-side `uniqueBuyers` repository method now returns the
+        // best display key per buyer (discord_user_id → discord_handle →
+        // customer_email). Render the three shapes:
+        //   - all digits      → Discord user ID, ping with <@id>
+        //   - contains an '@' → email address, render as-is
+        //   - otherwise       → Discord handle, prefix with @
+        let label;
+        if (/^\d+$/.test(b.buyer)) {
+            label = `<@${b.buyer}>`;
+        } else if (b.buyer.includes('@')) {
+            label = b.buyer;
+        } else {
+            label = `@${b.buyer}`;
+        }
         return `${i + 1}. ${label}`;
     }).join('\n');
 
