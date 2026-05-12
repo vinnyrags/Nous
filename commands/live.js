@@ -124,11 +124,31 @@ async function handleOffline(message) {
     // Cancel the reminder
     cancelReminder();
 
-    // Find the most recently completed queue for the recap
-    const recentQueues = await queueSource.getRecentQueues(1);
-    const closedQueueId = recentQueues.length ? recentQueues[0].id : null;
+    // Close the active queue if it has entries — that's the queue that was
+    // just served on stream. Without this, when no duck race runs the
+    // queue stays open across streams and the homepage Live Queue keeps
+    // showing stale entries (bit us 2026-05-11). An empty active queue is
+    // either a fresh "next stream" queue created by duck race or a no-sale
+    // stream; either way it can carry forward, so leave it alone.
+    let closedQueueId = null;
+    const closingQueue = await queueSource.getActiveQueue();
+    if (closingQueue) {
+        const closingEntries = await queueSource.getEntries(closingQueue.id);
+        if (closingEntries.length > 0) {
+            await queueSource.closeQueue(closingQueue.id);
+            await updateQueueChannelEmbed(closingQueue.id);
+            closedQueueId = closingQueue.id;
+        }
+    }
 
-    // Ensure a queue is open for next stream's pre-orders
+    // Recap reflects the queue we just served. Fall back to the most
+    // recent already-closed queue when we left the active one open.
+    if (!closedQueueId) {
+        const recentQueues = await queueSource.getRecentQueues(1);
+        closedQueueId = recentQueues.length ? recentQueues[0].id : null;
+    }
+
+    // Ensure a queue is open for next stream's pre-orders.
     let activeQueue = await queueSource.getActiveQueue();
     if (!activeQueue) {
         const queueResult = await queueSource.createQueue();

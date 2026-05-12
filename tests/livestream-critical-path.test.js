@@ -658,6 +658,26 @@ describe('offline session lifecycle', () => {
         // No shipping DMs — shipping is proactive at checkout
         expect(mockGetMember).not.toHaveBeenCalled();
     });
+
+    it('offline closes the queue when it has entries (no duck race ran)', async () => {
+        // Queue with served entries, livestream active, no duck race —
+        // mirrors the 2026-05-11 stream where /offline left the queue open.
+        stmts.queues.createQueue.run();
+        const queue = stmts.queues.getActiveQueue.get();
+        stmts.queues.addEntry.run(queue.id, 'buyer_discord', 'buyer@example.com', 'One Piece Box', 1, 'cs_offline_close');
+        stmts.livestream.startSession.run();
+
+        const offlineMsg = adminMsg();
+        await handleOffline(offlineMsg);
+
+        // Served queue is now closed
+        expect(stmts.queues.getQueueById.get(queue.id).status).toBe('closed');
+
+        // A fresh queue is open for next stream
+        const newQueue = stmts.queues.getActiveQueue.get();
+        expect(newQueue).toBeTruthy();
+        expect(newQueue.id).not.toBe(queue.id);
+    });
 });
 
 // =========================================================================
