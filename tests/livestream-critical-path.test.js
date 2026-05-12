@@ -717,40 +717,6 @@ describe('edge cases', () => {
         expect(activeQueue.status).toBe('open');
     });
 
-    it('offline migrates unfinished entries to the next session (pinned via source inspection)', async () => {
-        // Behavioral test would need a WP-backed queueSource — the SQLite
-        // shim returns sqliteUnsupported on updateEntry, so the migration
-        // is a no-op against the test harness. Source-inspection pins the
-        // code path so a regression removing the migration is caught.
-        //
-        // Real-world flow: a buyer submits a Request-to-See on /cards,
-        // creating a wp_queue_entries row with type=rts and status=queued.
-        // If /offline runs before the operator gets to that entry, without
-        // migration the entry is orphaned in the closed session and the
-        // buyer never gets called out — breaking the "We'll call you out
-        // when it's shown" promise from the confirmation email.
-        const fs = await import('node:fs');
-        const path = await import('node:path');
-        const liveSource = fs.readFileSync(
-            path.resolve(import.meta.dirname || new URL('.', import.meta.url).pathname, '../commands/live.js'),
-            'utf8'
-        );
-
-        // The unfinished list must be captured BEFORE closeQueue so we
-        // still have references to migrate after the close.
-        expect(liveSource).toContain('unfinishedToMigrate');
-        expect(liveSource).toMatch(/status\s*===\s*['"]queued['"]/);
-        expect(liveSource).toMatch(/status\s*===\s*['"]active['"]/);
-
-        // The migration call itself — sessionId is the new field that
-        // wp-queue.js's updateEntry now accepts (and the WP endpoint
-        // validates exists before writing).
-        expect(liveSource).toMatch(/updateEntry\([^)]+sessionId/);
-
-        // The operator-facing summary line ("Carried forward N entries")
-        // is the user-visible signal that migration happened.
-        expect(liveSource).toContain('Carried forward');
-    });
 
     it('anyone can view queue and duck race (no admin required)', async () => {
         stmts.queues.createQueue.run();

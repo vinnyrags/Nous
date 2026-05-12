@@ -47,6 +47,7 @@ function applyTosMetadata(params, discordUserId) {
     return params;
 }
 import { addClient, broadcast as broadcastQueue, clientCount } from './lib/queue-broadcaster.js';
+import { updateQueueChannelEmbed } from './commands/queue.js';
 import { client as discordClient } from './discord.js';
 
 const webhookLimit = createLimiter(10);
@@ -309,6 +310,31 @@ app.post('/webhooks/queue-changed', express.json({ limit: '256kb' }), (req, res)
 
     try {
         broadcastQueue(event, data ?? {});
+
+        // Refresh the Discord #queue embed for the affected session. Without
+        // this, website-originated entries (RTS submissions, future WP-direct
+        // flows) only update the homepage Live Queue via SSE — the Discord
+        // embed silently stays stale because nothing on the Discord side
+        // observes the WP-level action. Discord-source entries (orders, pull-
+        // box buys, battle entries via Stripe webhooks) already refresh the
+        // embed in their addToQueue handler, so this is a redundant no-op
+        // for those paths; the WP-source case is the load-bearing one.
+        const dataObj = data ?? {};
+        let sessionId = null;
+        if (event.startsWith('entry.') && dataObj.rawEntry && dataObj.rawEntry.sessionId) {
+            sessionId = Number(dataObj.rawEntry.sessionId);
+        } else if (event.startsWith('session.') && dataObj.session && dataObj.session.id) {
+            sessionId = Number(dataObj.session.id);
+        }
+        if (sessionId) {
+            // Fire-and-forget — don't block the webhook response on Discord
+            // rate limits or transient failures. The next queue mutation
+            // will retry the refresh anyway.
+            updateQueueChannelEmbed(sessionId).catch((e) => {
+                console.error(`queue-changed embed refresh failed for session ${sessionId}:`, e.message);
+            });
+        }
+
         res.sendStatus(200);
     } catch (e) {
         console.error('queue-changed broadcast failed:', e.message);

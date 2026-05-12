@@ -131,20 +131,18 @@ async function handleOffline(message) {
     // either a fresh "next stream" queue created by duck race or a no-sale
     // stream; either way it can carry forward, so leave it alone.
     //
-    // Unfinished entries (status=queued or active) are captured BEFORE the
-    // close so we can carry them forward to the next session once it
-    // exists. Without this, RTS requests (and any in-flight orders /
-    // battle entries / pull-box claims) get orphaned in the closed
-    // session and disappear from /queue forever.
+    // Entries STAY in their session of origin. The closed queue's Discord
+    // embed remains as the historical record of that night — both served
+    // and unserved entries visible on it. The website's Live Queue panel
+    // moves on to the new session (it only shows the active one). Manual
+    // recovery for individual entries is available via PATCH
+    // /shop/v1/queue/entries/{id} with `session_id`, gated by the bot
+    // secret (operator-only emergency tool).
     let closedQueueId = null;
-    let unfinishedToMigrate = [];
     const closingQueue = await queueSource.getActiveQueue();
     if (closingQueue) {
         const closingEntries = await queueSource.getEntries(closingQueue.id);
         if (closingEntries.length > 0) {
-            unfinishedToMigrate = closingEntries.filter(
-                (e) => e.status === 'queued' || e.status === 'active'
-            );
             await queueSource.closeQueue(closingQueue.id);
             await updateQueueChannelEmbed(closingQueue.id);
             closedQueueId = closingQueue.id;
@@ -164,28 +162,6 @@ async function handleOffline(message) {
         const queueResult = await queueSource.createQueue();
         activeQueue = queueResult.session ?? (await queueSource.getQueueById(queueResult.lastInsertRowid));
         await postQueueChannelEmbed(activeQueue);
-    }
-
-    // Carry forward unfinished entries from the just-closed queue. Done
-    // AFTER the new queue exists so we have a destination to migrate
-    // into. The WP-side endpoint validates target session existence, so
-    // there's no risk of parking entries against a phantom id.
-    let migratedCount = 0;
-    if (unfinishedToMigrate.length > 0 && activeQueue && activeQueue.id !== closedQueueId) {
-        for (const entry of unfinishedToMigrate) {
-            try {
-                await queueSource.updateEntry(entry.id, { sessionId: activeQueue.id });
-                migratedCount++;
-            } catch (e) {
-                console.error(`[offline] Failed to migrate entry ${entry.id}: ${e.message}`);
-            }
-        }
-        if (migratedCount > 0) {
-            // Refresh both embeds — old now shows closed with no entries
-            // (they've moved forward), new shows the carried-forward set.
-            await updateQueueChannelEmbed(closedQueueId);
-            await updateQueueChannelEmbed(activeQueue.id);
-        }
     }
 
     // Post stream-ended recap
@@ -221,14 +197,6 @@ async function handleOffline(message) {
         )
         .setColor(0x95a5a6)
         .setFooter({ text: 'Stream recap posted to #analytics' });
-
-    if (migratedCount > 0) {
-        offlineEmbed.addFields({
-            name: 'Carried forward',
-            value: `${migratedCount} unfinished entr${migratedCount === 1 ? 'y' : 'ies'} migrated from queue #${closedQueueId} → #${activeQueue.id}`,
-            inline: false,
-        });
-    }
 
     if (scanSummary) {
         offlineEmbed.addFields({
