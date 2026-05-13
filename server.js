@@ -49,6 +49,7 @@ function applyTosMetadata(params, discordUserId) {
 import { addClient, broadcast as broadcastQueue, clientCount } from './lib/queue-broadcaster.js';
 import { updateQueueChannelEmbed } from './commands/queue.js';
 import { updateDuckRaceEmbed } from './lib/duck-race-embed.js';
+import { broadcastDuckRaceEntryAdded } from './lib/activity-broadcaster.js';
 import { client as discordClient } from './discord.js';
 
 const webhookLimit = createLimiter(10);
@@ -298,6 +299,15 @@ app.post('/webhooks/shippingeasy', express.json(), handleShippingEasyWebhook);
 // same channel as orders/pack-battles/pull-boxes — no separate webhook.
 // =========================================================================
 
+// In-memory per-session roster snapshot. Used to detect when a NEW
+// unique buyer joins the duck race roster (count grew) so we can fire
+// the activity.duck_race.entry_added envelope exactly once per buyer
+// per session. Lost on bot restart — first roster.updated event for a
+// session after restart re-seeds the count without firing the envelope
+// (treating the entire roster as already-known), so we never spam the
+// feed with envelopes for buyers who joined while the bot was down.
+const sessionRosterCounts = new Map();
+
 app.post('/webhooks/queue-changed', express.json({ limit: '256kb' }), (req, res) => {
     const providedSecret = req.get('X-Bot-Secret') || '';
     if (!config.LIVESTREAM_SECRET || providedSecret !== config.LIVESTREAM_SECRET) {
@@ -344,6 +354,40 @@ app.post('/webhooks/queue-changed', express.json({ limit: '256kb' }), (req, res)
             updateDuckRaceEmbed(sessionId).catch((e) => {
                 console.error(`queue-changed duck-race embed refresh failed for session ${sessionId}:`, e.message);
             });
+
+            // Detect new unique buyer joining the duck race roster and
+            // fire the activity.duck_race.entry_added envelope so it
+            // shows up in the homepage Activity Feed alongside the
+            // raw entry.added event. Only fires on roster.updated (when
+            // we have rosterCount + roster); other event kinds skip.
+            if (event === 'roster.updated' && typeof dataObj.rosterCount === 'number') {
+                const newCount = dataObj.rosterCount;
+                const oldCount = sessionRosterCounts.has(sessionId)
+                    ? sessionRosterCounts.get(sessionId)
+                    : null;
+                sessionRosterCounts.set(sessionId, newCount);
+
+                // First event for this session post-restart — seed the
+                // count silently. Avoids replaying envelopes for every
+                // already-joined buyer when the bot comes back up.
+                if (oldCount !== null && newCount > oldCount && Array.isArray(dataObj.roster) && dataObj.roster.length > 0) {
+                    // The newest buyer is the LAST entry in the roster
+                    // (server returns first-purchase-time ASC). Render
+                    // their display key with the same three-shape contract
+                    // the queue/duck-race embeds use.
+                    const newest = dataObj.roster[dataObj.roster.length - 1];
+                    const buyer = String(newest.buyer || '');
+                    let label;
+                    if (/^\d+$/.test(buyer)) {
+                        label = `<@${buyer}>`;
+                    } else if (buyer.includes('@')) {
+                        label = buyer;
+                    } else {
+                        label = `@${buyer}`;
+                    }
+                    broadcastDuckRaceEntryAdded(label, newCount);
+                }
+            }
         }
 
         res.sendStatus(200);

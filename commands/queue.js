@@ -22,6 +22,7 @@ import { EmbedBuilder } from 'discord.js';
 import config from '../config.js';
 import * as queueSource from '../lib/queue-source.js';
 import { client, getChannel, sendEmbed, getMember, addRole } from '../discord.js';
+import { broadcastDuckRaceWinner } from '../lib/activity-broadcaster.js';
 
 // =========================================================================
 // Queue commands
@@ -513,6 +514,11 @@ async function finalizeDuckRace(queueId, winnerId, entryCount, message) {
         description: `${winnerLabel} wins tonight's duck race! Congrats!`,
         color: 0xffd700,
     });
+
+    // Mirror the moment into the homepage Activity Feed so viewers
+    // landing on itzenzo.tv at end-of-stream get the narrative beat
+    // without switching tabs to the dedicated Duck Race column.
+    broadcastDuckRaceWinner(winnerLabel, entryCount);
 
     // Open next queue for pre-orders
     const newQueueResult = await queueSource.createQueue();

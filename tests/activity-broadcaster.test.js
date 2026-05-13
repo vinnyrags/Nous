@@ -29,6 +29,8 @@ import {
     broadcastSoldOut,
     broadcastDiscordJoin,
     broadcastMinecraftJoin,
+    broadcastDuckRaceEntryAdded,
+    broadcastDuckRaceWinner,
 } from '../lib/activity-broadcaster.js';
 
 beforeEach(() => {
@@ -167,6 +169,42 @@ describe('community signal helpers', () => {
         // No realm key, no user — generic by design.
         expect(payload.meta).toEqual({});
         expect(payload.description).toBe('A buyer joined the Minecraft realm.');
+    });
+});
+
+describe('duck race helpers', () => {
+    it('broadcastDuckRaceEntryAdded uses activity.duck_race.entry_added with roster count', () => {
+        broadcastDuckRaceEntryAdded('@smoky0967', 5);
+        const [event, payload] = lastCall();
+        expect(event).toBe('activity.duck_race.entry_added');
+        expect(payload.kind).toBe('duck_race.entry_added');
+        expect(payload.description).toBe('@smoky0967 joined the duck race (5 entries).');
+        expect(payload.color).toBe('amber');
+        expect(payload.icon).toBe('🦆');
+        expect(payload.meta).toMatchObject({ buyerLabel: '@smoky0967', rosterCount: 5 });
+    });
+
+    it('broadcastDuckRaceEntryAdded singular when rosterCount is 1', () => {
+        broadcastDuckRaceEntryAdded('<@111>', 1);
+        const [, payload] = lastCall();
+        expect(payload.description).toBe('<@111> joined the duck race (1 entry).');
+    });
+
+    it('broadcastDuckRaceWinner uses activity.duck_race.winner with trophy icon', () => {
+        broadcastDuckRaceWinner('<@111>', 12);
+        const [event, payload] = lastCall();
+        expect(event).toBe('activity.duck_race.winner');
+        expect(payload.kind).toBe('duck_race.winner');
+        expect(payload.description).toBe("<@111> wins tonight's duck race (12 entries)!");
+        expect(payload.icon).toBe('🏆');
+        expect(payload.color).toBe('amber');
+        expect(payload.meta).toMatchObject({ winnerLabel: '<@111>', entryCount: 12 });
+    });
+
+    it('broadcastDuckRaceWinner omits entry-count clause when entryCount is falsy', () => {
+        broadcastDuckRaceWinner('@buyer');
+        const [, payload] = lastCall();
+        expect(payload.description).toBe("@buyer wins tonight's duck race!");
     });
 });
 
