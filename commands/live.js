@@ -68,19 +68,25 @@ async function handleLive(message) {
     const sessionId = result.lastInsertRowid;
 
     const shopLink = config.SHOP_URL;
+    const whatnotLink = 'https://whatnot.com/user/itzenzottv';
 
     // Post going-live announcement
     const embed = new EmbedBuilder()
-        .setTitle('🔴 We\'re Live!')
+        .setTitle('🔴 Live on Whatnot!')
         .setDescription(
-            `Card night is starting! Come hang.\n\n` +
-            `Watch on: [TikTok](https://tiktok.com/@itzenzoTTV) · [Instagram](https://instagram.com/itzenzo.TTV)`
+            `Live show is on. Come watch the pulls, auctions, and group breaks.\n\n` +
+            `**Watch live:** [whatnot.com/user/itzenzottv](${whatnotLink})\n` +
+            `**Catalog (24/7):** [itzenzo.tv](${shopLink})`
         )
         .setColor(0xceff00);
 
     const buttons = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-            .setLabel('🛒 Shop Now')
+            .setLabel('🎥 Watch on Whatnot')
+            .setStyle(ButtonStyle.Link)
+            .setURL(whatnotLink),
+        new ButtonBuilder()
+            .setLabel('🛒 Shop Catalog')
             .setStyle(ButtonStyle.Link)
             .setURL(shopLink),
     );

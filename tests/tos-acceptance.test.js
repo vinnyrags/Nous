@@ -186,6 +186,6 @@ describe('CURRENT_VERSION', () => {
         // breaks (one repo's CURRENT vs another's submitted). This test
         // is the canary — when you bump version, update it here too AND
         // bump both other places.
-        expect(CURRENT_VERSION).toBe('1.2');
+        expect(CURRENT_VERSION).toBe('1.3');
     });
 });
