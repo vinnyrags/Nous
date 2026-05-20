@@ -44,12 +44,25 @@ function csvEscape(s) {
 }
 
 function priceFromMeta(price) {
-    // Stored as "$15.00" — strip leading "$" and trailing ".00" if int.
+    // Whatnot requires positive integers — round half-up. Subcent prices
+    // like $99.99 become 100, $149.99 → 150. This is a strict requirement
+    // of the bulk-import CSV; non-integers fail validation.
     if (!price) return '';
     const cleaned = String(price).replace(/[^0-9.]/g, '');
     const num = parseFloat(cleaned);
-    if (!Number.isFinite(num)) return '';
-    return num % 1 === 0 ? String(num) : num.toFixed(2);
+    if (!Number.isFinite(num) || num < 1) return '';
+    return String(Math.round(num));
+}
+
+// Whatnot's Trading Card Games category enforces a small subcategory
+// enum. Anything outside the enum (e.g. "Other TCG Products") fails
+// CSV validation. "Pokémon Cards" is the only subcategory we've
+// confirmed Whatnot accepts in our uploads, so every product falls
+// back to it — the operator can re-tag any Weiss Schwarz / etc.
+// listings via the Whatnot UI after import. Caller still passes
+// title in case we expand the enum mapping later.
+function inferProductSubcategory(_title) {
+    return 'Pokémon Cards';
 }
 
 function titleCase(s) {
@@ -108,10 +121,6 @@ function buildCardRow(item) {
 function buildProductRow(item) {
     const m = item.meta || {};
     const title = item.title;
-    // Most products are Pokémon-related but a few are Weiss Schwarz —
-    // keep sub-category as "Pokémon Cards" when "Pokemon" appears in
-    // the title, fall back to a generic value otherwise.
-    const isPokemon = /pok[eé]mon/i.test(title);
     const shippingProfile = LIGHT_PRODUCT_IDS.has(item.id) ? '1-3 oz' : '1 lb';
     const desc = (
         `${title}. ` +
@@ -121,7 +130,7 @@ function buildProductRow(item) {
     );
     return {
         Category: 'Trading Card Games',
-        'Sub Category': isPokemon ? 'Pokémon Cards' : 'Other TCG Products',
+        'Sub Category': inferProductSubcategory(title),
         Title: title,
         Description: desc,
         Quantity: m.stock_quantity || '1',
@@ -140,7 +149,10 @@ function buildProductRow(item) {
 async function main() {
     const inv = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
     const rows = [HEADER];
-    let cardCount = 0, productCount = 0, skipped = [];
+    let cardCount = 0, productCount = 0;
+    const skipped = [];
+    const fallbackSubcategory = [];
+    const roundedPrices = [];
 
     for (const item of inv) {
         if (!item.image) {
@@ -153,6 +165,16 @@ async function main() {
         if (!row.Price) {
             skipped.push({ id: item.id, title: item.title, reason: 'no price' });
             continue;
+        }
+        // Surface anything Whatnot will require manual cleanup on:
+        // non-Pokemon products forced to the Pokémon Cards subcategory,
+        // and prices that were rounded away from their WP source value.
+        if (item.post_type === 'product' && !/pok[eé]mon/i.test(item.title)) {
+            fallbackSubcategory.push({ id: item.id, title: item.title });
+        }
+        const wpPrice = parseFloat(String((item.meta || {}).price || '').replace(/[^0-9.]/g, ''));
+        if (Number.isFinite(wpPrice) && wpPrice % 1 !== 0) {
+            roundedPrices.push({ id: item.id, title: item.title, from: wpPrice, to: row.Price });
         }
         rows.push(HEADER.map(h => row[h] ?? ''));
         if (item.post_type === 'card') cardCount++;
@@ -168,6 +190,14 @@ async function main() {
     if (skipped.length) {
         console.log(`\nSkipped ${skipped.length}:`);
         for (const s of skipped) console.log(`  - #${s.id} (${s.reason}): ${s.title}`);
+    }
+    if (fallbackSubcategory.length) {
+        console.log(`\nNon-Pokemon products forced to "Pokémon Cards" subcategory (re-tag on Whatnot UI):`);
+        for (const f of fallbackSubcategory) console.log(`  - #${f.id}: ${f.title}`);
+    }
+    if (roundedPrices.length) {
+        console.log(`\nPrices rounded to integer (Whatnot requirement):`);
+        for (const r of roundedPrices) console.log(`  - #${r.id}: $${r.from} → ${r.to} — ${r.title}`);
     }
 }
 
