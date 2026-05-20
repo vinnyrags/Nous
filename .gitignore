@@ -9,5 +9,7 @@ data.test.db-shm
 .env.test
 .env.local
 scripts/shop/node_modules/
+scripts/shop/__pycache__/
+*.pyc
 scripts/.publish
 scripts/.clean

@@ -1,0 +1,8 @@
+{
+  "capturedAt": "2026-05-09T03:15:42.614Z",
+  "seed": -615429155,
+  "path": "0:1:0:0:0:1:1:1:1:1:1",
+  "counterexample": "[[Purchase(buyer_alpha, seed=1, $1, 1L),WebhookRetry(buyer_alpha, seed=1)]]",
+  "commandSchema": "buyer-journey-v1",
+  "firstError": null
+}

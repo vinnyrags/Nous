@@ -1,0 +1,8 @@
+{
+  "capturedAt": "2026-05-09T03:15:14.512Z",
+  "seed": 1829399166,
+  "path": "0:0:0:0:0",
+  "counterexample": "[[Purchase(buyer_alpha, seed=1, $1, 1L)]]",
+  "commandSchema": "buyer-journey-v1",
+  "firstError": null
+}
