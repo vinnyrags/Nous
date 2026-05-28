@@ -52,11 +52,12 @@ const QUIET = args.includes('--quiet');
 const ROW_ARG = args.find((a) => a.startsWith('--row='));
 const ONLY_ROW = ROW_ARG ? parseInt(ROW_ARG.split('=')[1], 10) : null;
 
+// A-U schema (BIN Price inserted at F on 2026-05-25).
 const COL = {
     A: 0, B: 1, C: 2, D: 3, E: 4,
     F: 5, G: 6, H: 7, I: 8, J: 9,
     K: 10, L: 11, M: 12, N: 13, O: 14,
-    P: 15, Q: 16, R: 17, S: 18, T: 19,
+    P: 15, Q: 16, R: 17, S: 18, T: 19, U: 20,
 };
 
 // Standard Full Art rarity tier for Pokemon V / VMAX / GX.
@@ -144,7 +145,7 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:T`,
+        range: `${SHEET_NAME}!A2:U`,
     });
     const rows = res.data.values || [];
 
@@ -156,8 +157,8 @@ async function main() {
         if (ONLY_ROW && sheetRow !== ONLY_ROW) continue;
 
         const name = (row[COL.A] || '').trim();
-        const variant = (row[COL.K] || '').trim();
-        const apiId = (row[COL.R] || '').trim();
+        const variant = (row[COL.L] || '').trim();
+        const apiId = (row[COL.S] || '').trim();
         if (!name || !variant || !apiId) continue;
 
         const tier = classifyVariant(variant);
@@ -243,13 +244,13 @@ async function main() {
 
     if (!updates.length) return;
     if (!APPLY) {
-        console.log(`\nDry-run only. Re-run with --apply to write column R for ${updates.length} row(s).`);
+        console.log(`\nDry-run only. Re-run with --apply to write column S for ${updates.length} row(s).`);
         return;
     }
 
     console.log(`\nWriting ${updates.length} update(s)...`);
     const data = updates.map((u) => ({
-        range: `${SHEET_NAME}!R${u.sheetRow}`,
+        range: `${SHEET_NAME}!S${u.sheetRow}`,
         values: [[u.apiId]],
     }));
     await sheets.spreadsheets.values.batchUpdate({
@@ -259,7 +260,7 @@ async function main() {
             data,
         },
     });
-    console.log(`✓ Wrote column R for ${updates.length} row(s).`);
+    console.log(`✓ Wrote column S for ${updates.length} row(s).`);
     console.log('\nNext steps:');
     console.log('  1. node scripts/shop/enrich-singles.js --variants-only --dry-run    # refresh image URL + rarity for these rows');
     console.log('  2. node scripts/shop/enrich-singles.js --variants-only              # apply');

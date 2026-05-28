@@ -100,24 +100,24 @@ async function main() {
     const best = cards[0];
     console.log(`  → using: ${best.id} (${best.set?.name})`);
 
-    // Build cell writes. Columns:
-    //   I (8)  set name
-    //   J (9)  set code (use set.ptcgoCode if available, else set.id)
-    //   L (11) rarity
-    //   O (14) image URL (large preferred)
-    //   P (15) release date
-    //   Q (16) artist
-    //   R (17) Pokemon TCG API ID
+    // Build cell writes (A-U schema with BIN Price at F, 2026-05-25):
+    //   J (9)  set name           (was I)
+    //   K (10) set code           (was J)
+    //   M (12) rarity             (was L)
+    //   P (15) image URL          (was O)
+    //   Q (16) release date       (was P)
+    //   R (17) artist             (was Q)
+    //   S (18) Pokemon TCG API ID (was R)
     const setCode = best.set?.ptcgoCode || best.set?.id || '';
     const imageUrl = best.images?.large || best.images?.small || '';
     const writes = [
-      { col: 'I', value: best.set?.name || '' },
-      { col: 'J', value: setCode },
-      { col: 'L', value: rarityFromCard(best) },
-      { col: 'O', value: imageUrl },
-      { col: 'P', value: best.set?.releaseDate || '' },
-      { col: 'Q', value: best.artist || '' },
-      { col: 'R', value: best.id || '' },
+      { col: 'J', value: best.set?.name || '' },
+      { col: 'K', value: setCode },
+      { col: 'M', value: rarityFromCard(best) },
+      { col: 'P', value: imageUrl },
+      { col: 'Q', value: best.set?.releaseDate || '' },
+      { col: 'R', value: best.artist || '' },
+      { col: 'S', value: best.id || '' },
     ];
 
     if (fix.nameOverride) {

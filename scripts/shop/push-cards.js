@@ -1,29 +1,34 @@
 /**
  * Push Card Singles to Stripe from Google Sheets.
  *
- * Reads the `Singles` tab (post-migration A-T schema — see
- * scripts/shop/migrate-singles-schema.js) and creates/updates Stripe
- * products. Every product is tagged with `metadata.type = "card"` so
- * pull-cards.php claims it and pull-products.php skips it.
+ * Reads the `Singles` tab (post-2026-05-25 A-U schema with BIN Price
+ * inserted at column F) and creates/updates Stripe products. Every
+ * product is tagged with `metadata.type = "card"` so pull-cards.php
+ * claims it and pull-products.php skips it.
  *
- * Writes back the Stripe Product ID to column S on first push so
+ * Writes back the Stripe Product ID to column T on first push so
  * re-runs are idempotent (no duplicate Stripe products).
+ *
+ * Auction Price (column E) is the authoritative price pushed to
+ * Stripe's default_price. BIN Price (column F) is read-only here —
+ * it's surfaced through a separate path for the post-show BIN CSV.
  *
  * Usage:
  *   node scripts/shop/push-cards.js [--clean] [--dry-run] [--limit=N]
  *
  * Column layout expected:
- *   A Card Name            K Variant
- *   B TCGPlayer Direct     L Rarity
- *   C TCGPlayer Market NM  M Game
- *   D Price Charting       N Language
- *   E Price (authoritative → Stripe default_price)
- *   F Stock                O Image URL
- *   G Sale Price (opt)     P Release Date (YYYY-MM-DD)
- *   H Card Number          Q Artist
- *   I Set Name             R Pokemon TCG API ID
- *   J Set Code             S Stripe Product ID (writeback)
- *                          T Notes (internal, not pushed)
+ *   A Card Name            L Variant
+ *   B TCGPlayer Direct     M Rarity
+ *   C TCGPlayer Market NM  N Game
+ *   D Price Charting       O Language
+ *   E Auction Price (authoritative → Stripe default_price)
+ *   F BIN Price (informational; not pushed to Stripe)
+ *   G Stock                P Image URL
+ *   H Sale Price (opt)     Q Release Date (YYYY-MM-DD)
+ *   I Card Number          R Artist
+ *   J Set Name             S Pokemon TCG API ID
+ *   K Set Code             T Stripe Product ID (writeback)
+ *                          U Notes (internal, not pushed)
  */
 
 const fs = require('fs');
@@ -79,12 +84,12 @@ if (CLEAN && !DRY_RUN && STRIPE_MODE === 'live' && !ALLOW_LIVE_CLEAN) {
     process.exit(2);
 }
 
-// Column indices for the A-T schema.
+// Column indices for the A-U schema (BIN Price inserted at F on 2026-05-25).
 const COL = {
     A: 0, B: 1, C: 2, D: 3, E: 4,
     F: 5, G: 6, H: 7, I: 8, J: 9,
     K: 10, L: 11, M: 12, N: 13, O: 14,
-    P: 15, Q: 16, R: 17, S: 18, T: 19,
+    P: 15, Q: 16, R: 17, S: 18, T: 19, U: 20,
 };
 
 /**
@@ -176,7 +181,7 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:T`,
+        range: `${SHEET_NAME}!A2:U`,
     });
 
     const rows = res.data.values || [];
@@ -199,21 +204,22 @@ async function main() {
         const sheetRow = i + 2;
 
         const name = (row[COL.A] || '').trim();
-        const priceStr = (row[COL.E] || '').trim();
-        const stock = (row[COL.F] || '1').trim();
-        const salePriceStr = (row[COL.G] || '').trim();
-        const cardNumber = (row[COL.H] || '').trim();
-        const setName = (row[COL.I] || '').trim();
-        const setCode = (row[COL.J] || '').trim();
-        const variant = (row[COL.K] || '').trim();
-        const rarity = (row[COL.L] || '').trim();
-        const game = (row[COL.M] || 'pokemon').trim();
-        const language = (row[COL.N] || 'English').trim();
-        const imageUrl = (row[COL.O] || '').trim();
-        const releaseDate = (row[COL.P] || '').trim();
-        const artist = (row[COL.Q] || '').trim();
-        const tcgApiId = (row[COL.R] || '').trim();
-        const existingProductId = (row[COL.S] || '').trim();
+        const priceStr = (row[COL.E] || '').trim();          // Auction Price → Stripe default_price
+        // row[COL.F] = BIN Price — read by a separate pipeline, ignored here.
+        const stock = (row[COL.G] || '1').trim();
+        const salePriceStr = (row[COL.H] || '').trim();
+        const cardNumber = (row[COL.I] || '').trim();
+        const setName = (row[COL.J] || '').trim();
+        const setCode = (row[COL.K] || '').trim();
+        const variant = (row[COL.L] || '').trim();
+        const rarity = (row[COL.M] || '').trim();
+        const game = (row[COL.N] || 'pokemon').trim();
+        const language = (row[COL.O] || 'English').trim();
+        const imageUrl = (row[COL.P] || '').trim();
+        const releaseDate = (row[COL.Q] || '').trim();
+        const artist = (row[COL.R] || '').trim();
+        const tcgApiId = (row[COL.S] || '').trim();
+        const existingProductId = (row[COL.T] || '').trim();
         const tcgDirect = (row[COL.B] || '').trim();
         const tcgMarketNM = (row[COL.C] || '').trim();
         const priceCharting = (row[COL.D] || '').trim();
@@ -385,9 +391,9 @@ async function main() {
     }
 
     if (!DRY_RUN && writebacks.length) {
-        console.log(`\nWriting ${writebacks.length} Stripe Product ID(s) back to column S...`);
+        console.log(`\nWriting ${writebacks.length} Stripe Product ID(s) back to column T...`);
         const data = writebacks.map(({ rowIndex, productId }) => ({
-            range: `${SHEET_NAME}!S${rowIndex}`,
+            range: `${SHEET_NAME}!T${rowIndex}`,
             values: [[productId]],
         }));
         await sheets.spreadsheets.values.batchUpdate({

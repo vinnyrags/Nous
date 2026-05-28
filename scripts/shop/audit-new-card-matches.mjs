@@ -78,7 +78,7 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:T`,
+        range: `${SHEET_NAME}!A2:U`,
     });
     const rows = res.data.values || [];
     // Last 61 rows are the appended new cards.
@@ -94,12 +94,13 @@ async function main() {
         const row = newRows[i];
         const sheetRow = rows.length + 2 - newRows.length + i; // 1-indexed sheet row
 
-        const a = (row[0] || '').trim();   // name
-        const h = (row[7] || '').trim();   // number
-        const i_ = (row[8] || '').trim();  // set name (filled by enrichment)
-        const j = (row[9] || '').trim();   // set code (operator hint or filled)
-        const p = (row[15] || '').trim();  // release date (filled by enrichment)
-        const r_ = (row[17] || '').trim(); // Pokemon TCG API ID
+        // A-U schema (2026-05-25): columns shifted post-F.
+        const a = (row[0] || '').trim();   // A name
+        const h = (row[8] || '').trim();   // I number          (was H)
+        const i_ = (row[9] || '').trim();  // J set name        (was I)
+        const j = (row[10] || '').trim();  // K set code        (was J)
+        const p = (row[16] || '').trim();  // Q release date    (was P)
+        const r_ = (row[18] || '').trim(); // S Pokemon TCG API ID (was R)
 
         const intentPromo = isPromoIntent(inputLine);
         const setHint = setHintFromLine(inputLine);
