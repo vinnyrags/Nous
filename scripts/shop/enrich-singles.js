@@ -50,19 +50,20 @@ const VARIANTS_ONLY = process.argv.includes('--variants-only');
 // letter-prefix matching rule in scoreCandidate.
 const PREFIX_ONLY = process.argv.includes('--prefix-only');
 
-// Column indices for the A-T schema.
+// Column indices for the A-U schema (BIN Price inserted at F on 2026-05-25).
 const COL = {
-    A: 0, // Card Name
-    H: 7, // Card Number
-    I: 8, // Set Name
-    J: 9, // Set Code
-    K: 10, // Variant
-    L: 11, // Rarity
-    O: 14, // Image URL
-    P: 15, // Release Date (YYYY-MM-DD)
-    Q: 16, // Artist
-    R: 17, // Pokemon TCG API ID
-    T: 19, // Notes
+    A: 0,  // Card Name
+    I: 8,  // Card Number     (was H)
+    J: 9,  // Set Name        (was I)
+    K: 10, // Set Code        (was J)
+    L: 11, // Variant         (was K)
+    M: 12, // Rarity          (was L)
+    O: 14, // Language
+    P: 15, // Image URL       (was O)
+    Q: 16, // Release Date    (was P)
+    R: 17, // Artist          (was Q)
+    S: 18, // Pokemon TCG API ID (was R)
+    U: 20, // Notes           (was T)
 };
 
 const RARITY_MAP = {
@@ -442,7 +443,7 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:T`,
+        range: `${SHEET_NAME}!A2:U`,
     });
 
     const rows = res.data.values || [];
@@ -470,26 +471,30 @@ async function main() {
         if (ONLY_ROW && sheetRow !== ONLY_ROW) continue;
 
         const name = (row[COL.A] || '').trim();
-        const number = (row[COL.H] || '').trim();
-        const rawSetHint = (row[COL.I] || '').trim();
+        const number = (row[COL.I] || '').trim();
+        const rawSetHint = (row[COL.J] || '').trim();
         const setHint = cleanSetHint(rawSetHint);
-        const setCode = (row[COL.J] || '').trim();
-        const variantCol = (row[COL.K] || '').trim();
+        const setCode = (row[COL.K] || '').trim();
+        const variantCol = (row[COL.L] || '').trim();
 
         if (!name) continue;
-        if (VARIANTS_ONLY && !(row[COL.K] || '').trim()) continue;
+        // Japanese cards are enriched via TCGplayer (enrich-singles-japanese.mjs)
+        // — the Pokemon TCG API is English-only and would mismatch them to the
+        // wrong Western card. Never touch a row flagged Japanese in column O.
+        if ((row[COL.O] || '').trim().toLowerCase().startsWith('japan')) continue;
+        if (VARIANTS_ONLY && !(row[COL.L] || '').trim()) continue;
         if (PREFIX_ONLY) {
-            const h = (row[COL.H] || '').trim();
+            const h = (row[COL.I] || '').trim();
             // Match "SWSH076", "XY69", "SM213" — letters followed by digits.
             if (!/^[a-z]+\d/i.test(h)) continue;
         }
 
         // Skip fully-enriched rows unless --force
-        const rarity = (row[COL.L] || '').trim();
-        const image = (row[COL.O] || '').trim();
-        const year = (row[COL.P] || '').trim();
-        const artist = (row[COL.Q] || '').trim();
-        const apiId = (row[COL.R] || '').trim();
+        const rarity = (row[COL.M] || '').trim();
+        const image = (row[COL.P] || '').trim();
+        const year = (row[COL.Q] || '').trim();
+        const artist = (row[COL.R] || '').trim();
+        const apiId = (row[COL.S] || '').trim();
         if (!FORCE && rarity && image && year && artist && apiId) {
             logs.alreadyComplete++;
             continue;
@@ -586,13 +591,13 @@ async function main() {
         // so the new matcher's picks replace the old ones. Set Name (I) and
         // Set Code (J) remain user-owned — only filled when blank.
         const writes = {};
-        if (!setHint && apiSetName) writes.I = apiSetName;
-        if (!(row[COL.J] || '').trim() && apiSetId) writes.J = apiSetId;
-        if ((FORCE || !rarity) && apiRarity) writes.L = apiRarity;
-        if ((FORCE || !image) && apiImage) writes.O = apiImage;
-        if ((FORCE || !year) && apiReleaseDate) writes.P = apiReleaseDate;
-        if ((FORCE || !artist) && apiArtist) writes.Q = apiArtist;
-        if ((FORCE || !apiId) && apiCardId) writes.R = apiCardId;
+        if (!setHint && apiSetName) writes.J = apiSetName;
+        if (!(row[COL.K] || '').trim() && apiSetId) writes.K = apiSetId;
+        if ((FORCE || !rarity) && apiRarity) writes.M = apiRarity;
+        if ((FORCE || !image) && apiImage) writes.P = apiImage;
+        if ((FORCE || !year) && apiReleaseDate) writes.Q = apiReleaseDate;
+        if ((FORCE || !artist) && apiArtist) writes.R = apiArtist;
+        if ((FORCE || !apiId) && apiCardId) writes.S = apiCardId;
 
         for (const [col, value] of Object.entries(writes)) {
             updates.push({
@@ -604,10 +609,10 @@ async function main() {
         logs.enriched++;
         processed++;
         const summary = [
-            writes.I ? `set="${writes.I}"` : null,
-            writes.L ? `rarity=${writes.L}` : null,
-            writes.P ? `date=${writes.P}` : null,
-            writes.Q ? `artist="${writes.Q}"` : null,
+            writes.J ? `set="${writes.J}"` : null,
+            writes.M ? `rarity=${writes.M}` : null,
+            writes.Q ? `date=${writes.Q}` : null,
+            writes.R ? `artist="${writes.R}"` : null,
         ].filter(Boolean).join(' ');
         const apiIdDisplay = apiCardId || '—';
         const apiSetDisplay = apiSetName || '—';
@@ -647,11 +652,11 @@ async function main() {
         return;
     }
 
-    // Keep column P's header in sync with what we're writing — the
+    // Keep column Q's header in sync with what we're writing — the
     // migration originally titled it "Release Year" but we now write
-    // full YYYY-MM-DD dates.
+    // full YYYY-MM-DD dates. (Column moved P→Q in the 2026-05-25 schema.)
     updates.push({
-        range: `${SHEET_NAME}!P1`,
+        range: `${SHEET_NAME}!Q1`,
         values: [['Release Date']],
     });
 
