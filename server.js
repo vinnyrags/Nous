@@ -11,6 +11,7 @@
 
 import express from 'express';
 import Stripe from 'stripe';
+import { buildCheckoutSessionParams } from '@itzenzottv/stripe-bridge';
 import config from './config.js';
 import { battles, cardListings, purchases, discordLinks, stripeEvents, activityEvents } from './db.js';
 import {
@@ -565,36 +566,27 @@ app.get('/battle/checkout/:id', async (req, res) => {
                 .send('This pack battle is not available right now — the operator has been notified.');
         }
 
-        const params = {
-            mode: 'payment',
-            line_items: [{ price: battle.stripe_price_id, quantity: 1 }],
-            allow_promotion_codes: true,
-            success_url: `${config.SITE_URL}/shop/thank-you/`,
-            cancel_url: config.SHOP_URL,
+        // Prefill email + receipt for linked buyers (receipt_email is a
+        // separate Stripe field from customer_email; both need setting for
+        // prefill + the "Stripe receipt for every purchase" claim).
+        const link = discordUserId ? purchases.getEmailByDiscordId.get(discordUserId) : null;
+
+        // No shipping on battle buy-in — only the winner gets shipped product.
+        // Winner's shipping is handled after /battle winner declaration.
+        const params = buildCheckoutSessionParams({
+            lineItems: [{ price: battle.stripe_price_id, quantity: 1 }],
+            allowPromotionCodes: true,
+            successUrl: `${config.SITE_URL}/shop/thank-you/`,
+            cancelUrl: config.SHOP_URL,
             metadata: {
                 battle_id: String(battle.id),
                 source: 'pack-battle',
                 discord_user_id: discordUserId || '',
             },
-            custom_fields: customFieldsFor(discordUserId),
-        };
-
-        // Prefill email for linked buyers
-        if (discordUserId) {
-            const link = purchases.getEmailByDiscordId.get(discordUserId);
-            if (link) {
-                params.customer_email = link.customer_email;
-                // Receipts to the buyer's address — fulfills the
-                // "you'll get a Stripe receipt for every purchase"
-                // claim on /how-it-works/buying. receipt_email is a
-                // separate Stripe field from customer_email; both
-                // need to be set for the prefill + receipt to flow.
-                params.receipt_email = link.customer_email;
-            }
-        }
-
-        // No shipping on battle buy-in — only the winner gets shipped product.
-        // Winner's shipping is handled after /battle winner declaration.
+            customFields: customFieldsFor(discordUserId),
+            customerEmail: link ? link.customer_email : null,
+            receiptEmail: link ? link.customer_email : null,
+        });
 
         applyTosMetadata(params, discordUserId);
         const session = await stripe.checkout.sessions.create(params);
@@ -681,12 +673,11 @@ app.post('/web/battle/checkout', express.json(), async (req, res) => {
             terms_accepted_ua: userAgent,
         };
 
-        const params = {
-            mode: 'payment',
-            line_items: [{ price: battle.stripe_price_id, quantity: 1 }],
-            allow_promotion_codes: true,
-            success_url: `${config.SHOP_URL}/thank-you?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${config.SHOP_URL}/?cancelled=1`,
+        const params = buildCheckoutSessionParams({
+            lineItems: [{ price: battle.stripe_price_id, quantity: 1 }],
+            allowPromotionCodes: true,
+            successUrl: `${config.SHOP_URL}/thank-you?session_id={CHECKOUT_SESSION_ID}`,
+            cancelUrl: `${config.SHOP_URL}/?cancelled=1`,
             metadata: {
                 battle_id: String(battle.id),
                 source: 'pack-battle',
@@ -696,8 +687,8 @@ app.post('/web/battle/checkout', express.json(), async (req, res) => {
             // Web buyers always get the Discord-username field (same as
             // the Discord flow when no ?user= is supplied) so the bot
             // can match their entry post-purchase if they have an account.
-            custom_fields: customFieldsFor(null),
-        };
+            customFields: customFieldsFor(null),
+        });
         params.payment_intent_data = {
             metadata: { ...params.metadata },
         };
@@ -754,12 +745,19 @@ app.get('/card-shop/checkout/:listingId', async (req, res) => {
             lineItem.adjustable_quantity = { enabled: true, minimum: 1, maximum: 20 };
         }
 
-        const params = {
-            mode: 'payment',
-            line_items: [lineItem],
-            allow_promotion_codes: true,
-            success_url: `${config.SITE_URL}/shop/thank-you/`,
-            cancel_url: config.SHOP_URL,
+        // Prefill email + receipt for linked buyers (both fields required).
+        const link = discordUserId ? purchases.getEmailByDiscordId.get(discordUserId) : null;
+
+        // Conditional shipping: skip if buyer already covered this period
+        const covered = discordUserId
+            ? hasShippingCoveredByDiscordId(discordUserId)
+            : false;
+
+        const params = buildCheckoutSessionParams({
+            lineItems: [lineItem],
+            allowPromotionCodes: true,
+            successUrl: `${config.SITE_URL}/shop/thank-you/`,
+            cancelUrl: config.SHOP_URL,
             metadata: {
                 card_listing_id: String(listing.id),
                 card_name: listing.card_name,
@@ -767,32 +765,12 @@ app.get('/card-shop/checkout/:listingId', async (req, res) => {
                 reserved_for: listing.buyer_discord_id || '',
                 discord_user_id: discordUserId || '',
             },
-            custom_fields: customFieldsFor(discordUserId),
-        };
-
-        // Prefill email for linked buyers
-        if (discordUserId) {
-            const link = purchases.getEmailByDiscordId.get(discordUserId);
-            if (link) {
-                params.customer_email = link.customer_email;
-                // Receipts to the buyer's address — fulfills the
-                // "you'll get a Stripe receipt for every purchase"
-                // claim on /how-it-works/buying. receipt_email is a
-                // separate Stripe field from customer_email; both
-                // need to be set for the prefill + receipt to flow.
-                params.receipt_email = link.customer_email;
-            }
-        }
-
-        // Conditional shipping: skip if buyer already covered this period
-        const covered = discordUserId
-            ? hasShippingCoveredByDiscordId(discordUserId)
-            : false;
-
-        if (!covered) {
-            params.shipping_options = buildShippingOptions(discordUserId);
-            params.shipping_address_collection = { allowed_countries: config.SHIPPING.COUNTRIES };
-        }
+            customFields: customFieldsFor(discordUserId),
+            customerEmail: link ? link.customer_email : null,
+            receiptEmail: link ? link.customer_email : null,
+            shippingOptions: covered ? null : buildShippingOptions(discordUserId),
+            shippingAddressCollection: covered ? null : { allowed_countries: config.SHIPPING.COUNTRIES },
+        });
 
         applyTosMetadata(params, discordUserId);
         const session = await stripe.checkout.sessions.create(params);
@@ -850,39 +828,27 @@ app.get('/pull-box/checkout', async (req, res) => {
             },
         };
 
-        const params = {
-            mode: 'payment',
-            line_items: [lineItem],
-            allow_promotion_codes: true,
-            success_url: `${config.SHOP_URL}/thank-you?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: config.SHOP_URL,
+        // Prefill email + receipt for linked buyers (both fields required).
+        const link = discordUserId ? purchases.getEmailByDiscordId.get(discordUserId) : null;
+
+        const covered = discordUserId ? hasShippingCoveredByDiscordId(discordUserId) : false;
+
+        const params = buildCheckoutSessionParams({
+            lineItems: [lineItem],
+            allowPromotionCodes: true,
+            successUrl: `${config.SHOP_URL}/thank-you?session_id={CHECKOUT_SESSION_ID}`,
+            cancelUrl: config.SHOP_URL,
             metadata: {
                 source: 'pull_box',
                 pull_box_id: String(box.id),
                 discord_user_id: discordUserId || '',
             },
-            custom_fields: customFieldsFor(discordUserId),
-        };
-
-        // Prefill email for linked buyers
-        if (discordUserId) {
-            const link = purchases.getEmailByDiscordId.get(discordUserId);
-            if (link) {
-                params.customer_email = link.customer_email;
-                // Receipts to the buyer's address — fulfills the
-                // "you'll get a Stripe receipt for every purchase"
-                // claim on /how-it-works/buying. receipt_email is a
-                // separate Stripe field from customer_email; both
-                // need to be set for the prefill + receipt to flow.
-                params.receipt_email = link.customer_email;
-            }
-        }
-
-        const covered = discordUserId ? hasShippingCoveredByDiscordId(discordUserId) : false;
-        if (!covered) {
-            params.shipping_options = buildShippingOptions(discordUserId);
-            params.shipping_address_collection = { allowed_countries: config.SHIPPING.COUNTRIES };
-        }
+            customFields: customFieldsFor(discordUserId),
+            customerEmail: link ? link.customer_email : null,
+            receiptEmail: link ? link.customer_email : null,
+            shippingOptions: covered ? null : buildShippingOptions(discordUserId),
+            shippingAddressCollection: covered ? null : { allowed_countries: config.SHIPPING.COUNTRIES },
+        });
 
         applyTosMetadata(params, discordUserId);
         const session = await stripe.checkout.sessions.create(params);
@@ -902,42 +868,29 @@ app.get('/product/checkout/:priceId', async (req, res) => {
         const stripe = new Stripe(config.STRIPE_SECRET_KEY);
         const discordUserId = req.query.user;
 
-        const params = {
-            mode: 'payment',
-            line_items: [{ price: req.params.priceId, quantity: 1 }],
-            allow_promotion_codes: true,
-            success_url: `${config.SITE_URL}/shop/thank-you/`,
-            cancel_url: config.SHOP_URL,
-            metadata: {
-                source: 'hype-checkout',
-                discord_user_id: discordUserId || '',
-            },
-            custom_fields: customFieldsFor(discordUserId),
-        };
-
-        // Prefill email for linked buyers
-        if (discordUserId) {
-            const link = purchases.getEmailByDiscordId.get(discordUserId);
-            if (link) {
-                params.customer_email = link.customer_email;
-                // Receipts to the buyer's address — fulfills the
-                // "you'll get a Stripe receipt for every purchase"
-                // claim on /how-it-works/buying. receipt_email is a
-                // separate Stripe field from customer_email; both
-                // need to be set for the prefill + receipt to flow.
-                params.receipt_email = link.customer_email;
-            }
-        }
+        // Prefill email + receipt for linked buyers (both fields required).
+        const link = discordUserId ? purchases.getEmailByDiscordId.get(discordUserId) : null;
 
         // Conditional shipping based on buyer identity
         const covered = discordUserId
             ? hasShippingCoveredByDiscordId(discordUserId)
             : false;
 
-        if (!covered) {
-            params.shipping_options = buildShippingOptions(discordUserId);
-            params.shipping_address_collection = { allowed_countries: config.SHIPPING.COUNTRIES };
-        }
+        const params = buildCheckoutSessionParams({
+            lineItems: [{ price: req.params.priceId, quantity: 1 }],
+            allowPromotionCodes: true,
+            successUrl: `${config.SITE_URL}/shop/thank-you/`,
+            cancelUrl: config.SHOP_URL,
+            metadata: {
+                source: 'hype-checkout',
+                discord_user_id: discordUserId || '',
+            },
+            customFields: customFieldsFor(discordUserId),
+            customerEmail: link ? link.customer_email : null,
+            receiptEmail: link ? link.customer_email : null,
+            shippingOptions: covered ? null : buildShippingOptions(discordUserId),
+            shippingAddressCollection: covered ? null : { allowed_countries: config.SHIPPING.COUNTRIES },
+        });
 
         applyTosMetadata(params, discordUserId);
         const session = await stripe.checkout.sessions.create(params);
@@ -969,9 +922,11 @@ app.get('/shipping/checkout', async (req, res) => {
 
     try {
         const stripe = new Stripe(config.STRIPE_SECRET_KEY);
-        const params = {
-            mode: 'payment',
-            line_items: [
+        // Prefill email + send receipt for linked buyers (matches the
+        // pattern in every other Stripe session.create above).
+        const link = req.query.user ? purchases.getEmailByDiscordId.get(req.query.user) : null;
+        const params = buildCheckoutSessionParams({
+            lineItems: [
                 {
                     price_data: {
                         currency: 'usd',
@@ -984,25 +939,19 @@ app.get('/shipping/checkout', async (req, res) => {
                     quantity: 1,
                 },
             ],
-            success_url: `${config.SHOP_URL}?shipping_paid=1`,
-            cancel_url: config.SHOP_URL,
+            successUrl: `${config.SHOP_URL}?shipping_paid=1`,
+            cancelUrl: config.SHOP_URL,
             metadata: {
                 source: 'ad-hoc-shipping',
                 discord_user_id: req.query.user || '',
                 reason,
             },
-            shipping_address_collection: { allowed_countries: config.SHIPPING.COUNTRIES },
-            custom_fields: customFieldsFor(req.query.user),
-        };
-        // Prefill email + send receipt for linked buyers (matches the
-        // pattern in every other Stripe session.create above).
-        if (req.query.user) {
-            const link = purchases.getEmailByDiscordId.get(req.query.user);
-            if (link) {
-                params.customer_email = link.customer_email;
-                params.receipt_email = link.customer_email;
-            }
-        }
+            // Address collection only — no rate options on ad-hoc shipping.
+            shippingAddressCollection: { allowed_countries: config.SHIPPING.COUNTRIES },
+            customFields: customFieldsFor(req.query.user),
+            customerEmail: link ? link.customer_email : null,
+            receiptEmail: link ? link.customer_email : null,
+        });
         applyTosMetadata(params, req.query.user);
         const session = await stripe.checkout.sessions.create(params);
 
@@ -1102,9 +1051,8 @@ app.post('/shipping/start-checkout', express.json(), async (req, res) => {
 
     try {
         const stripe = new Stripe(config.STRIPE_SECRET_KEY);
-        const params = {
-            mode: 'payment',
-            line_items: [
+        const params = buildCheckoutSessionParams({
+            lineItems: [
                 {
                     price_data: {
                         currency: 'usd',
@@ -1117,19 +1065,20 @@ app.post('/shipping/start-checkout', express.json(), async (req, res) => {
                     quantity: 1,
                 },
             ],
-            success_url: `${config.SHOP_URL}?shipping_paid=1`,
-            cancel_url: config.SHOP_URL,
+            successUrl: `${config.SHOP_URL}?shipping_paid=1`,
+            cancelUrl: config.SHOP_URL,
             metadata: {
                 source: 'web-shipping-payment',
                 buyer_email: email,
             },
-            customer_email: email,
+            customerEmail: email,
             // Stripe-issued receipt regardless of Discord link state —
             // the whole point of this flow is to serve buyers who
             // don't use Discord.
-            receipt_email: email,
-            shipping_address_collection: { allowed_countries: config.SHIPPING.COUNTRIES },
-        };
+            receiptEmail: email,
+            // No custom_fields on this flow (no Discord username prompt).
+            shippingAddressCollection: { allowed_countries: config.SHIPPING.COUNTRIES },
+        });
         // ToS audit fields — when called via the WP-side proxy, WP's
         // TouAcceptance::validate has already verified terms_version
         // and produced the audit array. We accept it from the request

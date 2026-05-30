@@ -18,7 +18,16 @@
 // resolves before any real surface is wired up.
 export const BRIDGE_VERSION = '0.1.0';
 
-// Stripe key mode detection (live/test/unknown). Re-exported so ESM
-// consumers can `import { detectMode } from '@itzenzottv/stripe-bridge'`;
-// CJS consumers use the `@itzenzottv/stripe-bridge/stripe-mode` subpath.
-export { detectMode, isLiveMode, isTestMode } from './stripe-mode.cjs';
+// Unified Checkout Session param assembler (replaces the 8 inline params
+// objects in the Nous bot). Pure — no Stripe I/O, no DB, no magic defaults.
+export { buildCheckoutSessionParams } from './checkout/session-params.js';
+
+// Stripe key mode detection (live/test/unknown). Imported as a CJS default
+// (the module.exports object) then re-exported as named bindings. NB: a
+// direct `export { … } from './stripe-mode.cjs'` works under plain Node but
+// Vite/esbuild (vitest) mis-transforms a CJS *named* re-export and silently
+// drops every export declared after it — so we destructure instead. CJS
+// consumers still use the `@itzenzottv/stripe-bridge/stripe-mode` subpath.
+import stripeMode from './stripe-mode.cjs';
+const { detectMode, isLiveMode, isTestMode } = stripeMode;
+export { detectMode, isLiveMode, isTestMode };
