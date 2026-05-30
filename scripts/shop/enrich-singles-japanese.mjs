@@ -13,13 +13,13 @@
  * For each targeted row this:
  *   - searches TCGplayer (productName = card name, line = pokemon-japan)
  *   - scores candidates by number + set-name match (number is decisive)
- *   - writes the still-blank enrichment slots:
- *       K  Set Code   (the "S6a" prefix parsed off TCGplayer's setName)
- *       M  Rarity     (TCGplayer rarity, normalized — often absent for JP)
- *       O  Language   ("Japanese")
- *       P  Image URL  (product-images.tcgplayer.com/fit-in/1500x1500/{id}.jpg)
- *       Q  Release    (set release date from TCGdex, best-effort)
- *       S  Ref ID     ("tcgp-{productId}" — provenance + idempotency marker)
+ *   - writes the still-blank enrichment slots (A-T schema, 2026-05-29):
+ *       J  Set Code   (the "S6a" prefix parsed off TCGplayer's setName)
+ *       L  Rarity     (TCGplayer rarity, normalized — often absent for JP)
+ *       N  Language   ("Japanese")
+ *       O  Image URL  (product-images.tcgplayer.com/fit-in/1500x1500/{id}.jpg)
+ *       P  Release    (set release date from TCGdex, best-effort)
+ *       R  Ref ID     ("tcgp-{productId}" — provenance + idempotency marker)
  *
  * Release date and rarity are best-effort; the image is the point.
  * Idempotent: a row with column P already filled is skipped (unless --force).
@@ -59,10 +59,11 @@ const ONLY_ROW = arg('row', null);
 // attaching a wrong image when the card name/number/set don't agree.
 const MIN_SCORE = arg('min-score', 0);
 
-// A-U schema (BIN Price inserted at F on 2026-05-25).
+// A-T schema (2026-05-29: TCGPlayer cols removed, Collectr added at C).
 const COL = {
-    A: 0, E: 4, F: 5, G: 6, I: 8, J: 9, K: 10,
-    L: 11, M: 12, N: 13, O: 14, P: 15, Q: 16, R: 17, S: 18, T: 19,
+    A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6,
+    H: 7, I: 8, J: 9, K: 10, L: 11, M: 12, N: 13,
+    O: 14, P: 15, Q: 16, R: 17, S: 18, T: 19,
 };
 
 // TCGplayer JP rarity strings → our internal vocabulary (same target set
@@ -252,7 +253,7 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:U`,
+        range: `${SHEET_NAME}!A2:T`,
     });
     const rows = res.data.values || [];
 
@@ -269,9 +270,9 @@ async function main() {
 
         const row = rows[i];
         const name = (row[COL.A] || '').trim();
-        const number = (row[COL.I] || '').trim();
-        const setName = (row[COL.J] || '').trim();
-        const haveImage = (row[COL.P] || '').trim();
+        const number = (row[COL.H] || '').trim();
+        const setName = (row[COL.I] || '').trim();
+        const haveImage = (row[COL.O] || '').trim();
         if (!name) continue;
         if (haveImage && !FORCE) {
             logs.skipped++;
@@ -310,12 +311,12 @@ async function main() {
         await sleep(120);
 
         const writes = {};
-        if ((FORCE || !(row[COL.P] || '').trim())) writes.P = TCG_IMAGE(pid);
-        if (!(row[COL.K] || '').trim() && setCode) writes.K = setCode;
-        if ((FORCE || !(row[COL.M] || '').trim()) && rarity) writes.M = rarity;
-        if (!(row[COL.O] || '').trim()) writes.O = 'Japanese';
-        if ((FORCE || !(row[COL.Q] || '').trim()) && release) writes.Q = release;
-        if (!(row[COL.S] || '').trim()) writes.S = `tcgp-${pid}`;
+        if ((FORCE || !(row[COL.O] || '').trim())) writes.O = TCG_IMAGE(pid);      // Image URL
+        if (!(row[COL.J] || '').trim() && setCode) writes.J = setCode;             // Set Code
+        if ((FORCE || !(row[COL.L] || '').trim()) && rarity) writes.L = rarity;    // Rarity
+        if (!(row[COL.N] || '').trim()) writes.N = 'Japanese';                     // Language
+        if ((FORCE || !(row[COL.P] || '').trim()) && release) writes.P = release;  // Release Date
+        if (!(row[COL.R] || '').trim()) writes.R = `tcgp-${pid}`;                  // Pokemon TCG API ID / provenance
 
         for (const [c, v] of Object.entries(writes)) {
             updates.push({ range: `${SHEET_NAME}!${c}${sheetRow}`, values: [[v]] });

@@ -1,6 +1,6 @@
 /**
  * Pre-flight audit for sync-cards-production. Compares each Sheet row's
- * column E (display price) against the corresponding Stripe product's
+ * column D (display price) against the corresponding Stripe product's
  * current default_price.unit_amount.
  *
  * Why this exists: push-cards.js's update path REUSES the existing
@@ -32,10 +32,11 @@ const SHEET_NAME = 'Singles';
 
 const VERBOSE = process.argv.includes('--verbose');
 
-// A-U schema (2026-05-25): Auction Price stays at E; Stripe Product ID moved S→T.
+// A-T schema (2026-05-28): TCGPlayer Direct/Market removed, Collectr inserted
+// at C. Auction Price moved E→D; Stripe Product ID moved T→S.
 const COL_A_INDEX = 0;   // name (for reporting)
-const COL_E_INDEX = 4;   // Auction Price (display string like "$5", "$1,000")
-const COL_T_INDEX = 19;  // stripe_product_id
+const COL_D_INDEX = 3;   // Auction Price (display string like "$5", "$1,000")
+const COL_S_INDEX = 18;  // stripe_product_id
 
 /**
  * Parse a display price string like "$25", "$1,000", or "$24.99" into
@@ -66,7 +67,7 @@ function readProductionStripeKey() {
 }
 
 async function main() {
-    console.log(`\n=== Card price audit (Sheet column E ↔ Stripe default_price) ===\n`);
+    console.log(`\n=== Card price audit (Sheet column D ↔ Stripe default_price) ===\n`);
 
     const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
     const auth = new google.auth.GoogleAuth({
@@ -77,7 +78,7 @@ async function main() {
 
     const dataRes = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:U`,
+        range: `${SHEET_NAME}!A2:T`,
     });
     const rows = dataRes.data.values || [];
     console.log(`Singles rows: ${rows.length}`);
@@ -88,8 +89,8 @@ async function main() {
     for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const name = (row[COL_A_INDEX] || '').trim();
-        const priceStr = (row[COL_E_INDEX] || '').trim();
-        const stripeId = (row[COL_T_INDEX] || '').trim();
+        const priceStr = (row[COL_D_INDEX] || '').trim();
+        const stripeId = (row[COL_S_INDEX] || '').trim();
         if (!name) continue;
         const priceCents = priceToCents(priceStr);
         if (isNaN(priceCents)) {
@@ -103,8 +104,8 @@ async function main() {
         candidates.push({ rowNumber: i + 2, name, sheetPriceCents: priceCents, stripeId });
     }
     console.log(`  Rows with valid price + Stripe ID: ${candidates.length}`);
-    if (unparseable) console.log(`  Rows skipped (column E unparseable): ${unparseable}`);
-    if (noStripeId) console.log(`  Rows skipped (no Stripe product ID in column T): ${noStripeId}`);
+    if (unparseable) console.log(`  Rows skipped (column D unparseable): ${unparseable}`);
+    if (noStripeId) console.log(`  Rows skipped (no Stripe product ID in column S): ${noStripeId}`);
     console.log('');
 
     console.log(`Fetching live Stripe key from production droplet...`);
@@ -157,7 +158,7 @@ async function main() {
         console.log(`overwriting the price IDs currently in WP postmeta.\n`);
         for (const m of mismatches) {
             console.log(`  row ${m.rowNumber}: ${m.name}`);
-            console.log(`    Sheet column E:        ${formatCents(m.sheetPriceCents)}`);
+            console.log(`    Sheet column D:        ${formatCents(m.sheetPriceCents)}`);
             console.log(`    Stripe default_price:  ${formatCents(m.stripePriceCents)} (${m.priceId})`);
             console.log(`    Stripe product:        ${m.stripeId}`);
             console.log('');

@@ -94,22 +94,22 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:U`,
+        range: `${SHEET_NAME}!A2:T`,
     });
     const rows = res.data.values || [];
 
-    // A-U schema (BIN Price at F on 2026-05-25):
-    //   row[0]=name  row[8]=number  row[9]=set  row[11]=variant  row[15]=image
+    // A-T schema (2026-05-29: TCGPlayer cols removed, Collectr added at C):
+    //   row[0]=name  row[7]=number  row[8]=set  row[10]=variant  row[14]=image
     // Build an index: (set, number, name) -> {rowNumber, currentImage}
     // Skip rows with non-empty Variant column (1st Editions etc.).
     const byKey = new Map();
     rows.forEach((row, i) => {
         const rowNum = i + 2;
         const name = row[0];
-        const number = row[8];
-        const set = row[9];
-        const variant = row[11];
-        const image = row[15] || '';
+        const number = row[7];
+        const set = row[8];
+        const variant = row[10];
+        const image = row[14] || '';
         if (variant && variant.trim()) return; // skip 1st Editions
         const key = `${normalize(set)}|${number}|${normalize(name)}`;
         if (!byKey.has(key)) byKey.set(key, []);
@@ -120,13 +120,13 @@ async function main() {
     const bySetNumber = new Map();
     rows.forEach((row, i) => {
         const rowNum = i + 2;
-        const variant = row[11];
-        const number = row[8];
-        const set = row[9];
+        const variant = row[10];
+        const number = row[7];
+        const set = row[8];
         if (variant && variant.trim()) return;
         const key = `${normalize(set)}|${number}`;
         if (!bySetNumber.has(key)) bySetNumber.set(key, []);
-        bySetNumber.get(key).push({ rowNum, name: row[0], number, set, image: row[15] || '' });
+        bySetNumber.get(key).push({ rowNum, name: row[0], number, set, image: row[14] || '' });
     });
 
     const updates = [];
@@ -173,7 +173,7 @@ async function main() {
         const target = matchSet[0];
         if (target.image === card.new_source_url) continue; // already correct
         updates.push({
-            range: `${SHEET_NAME}!P${target.rowNum}`,
+            range: `${SHEET_NAME}!O${target.rowNum}`,
             values: [[card.new_source_url]],
             _meta: { row: target.rowNum, name: target.name, oldImage: target.image, newImage: card.new_source_url },
         });
@@ -225,7 +225,7 @@ async function main() {
         written += chunk.length;
         console.log(`  wrote chunk: ${written}/${updates.length}`);
     }
-    console.log(`\nApplied ${written} updates to col P.`);
+    console.log(`\nApplied ${written} updates to col O.`);
 }
 
 main().catch(e => { console.error(e); process.exit(1); });

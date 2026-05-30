@@ -78,7 +78,7 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:U`,
+        range: `${SHEET_NAME}!A2:T`,
     });
     const rows = res.data.values || [];
     // Last 61 rows are the appended new cards.
@@ -94,13 +94,14 @@ async function main() {
         const row = newRows[i];
         const sheetRow = rows.length + 2 - newRows.length + i; // 1-indexed sheet row
 
-        // A-U schema (2026-05-25): columns shifted post-F.
+        // A-T schema (2026-05-28): TCGPlayer Direct/Market removed, Collectr
+        // inserted at C; columns from old D onward shifted left by one.
         const a = (row[0] || '').trim();   // A name
-        const h = (row[8] || '').trim();   // I number          (was H)
-        const i_ = (row[9] || '').trim();  // J set name        (was I)
-        const j = (row[10] || '').trim();  // K set code        (was J)
-        const p = (row[16] || '').trim();  // Q release date    (was P)
-        const r_ = (row[18] || '').trim(); // S Pokemon TCG API ID (was R)
+        const h = (row[7] || '').trim();   // H number
+        const i_ = (row[8] || '').trim();  // I set name
+        const j = (row[9] || '').trim();   // J set code
+        const p = (row[15] || '').trim();  // P release date
+        const r_ = (row[17] || '').trim(); // R Pokemon TCG API ID
 
         const intentPromo = isPromoIntent(inputLine);
         const setHint = setHintFromLine(inputLine);

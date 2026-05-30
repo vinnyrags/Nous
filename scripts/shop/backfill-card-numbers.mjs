@@ -53,10 +53,10 @@ const SHEET_NAME = 'Singles';
 const APPLY = process.argv.includes('--apply');
 const VERBOSE = process.argv.includes('--verbose');
 
-// A-U schema (BIN Price at F on 2026-05-25): Card Number moved H→I,
-// Stripe Product ID moved S→T.
-const COL_I_INDEX = 8;   // 0-based — column I (card number)
-const COL_T_INDEX = 19;  // 0-based — column T (stripe_product_id)
+// A-T schema (2026-05-29: TCGPlayer cols removed, Collectr added at C):
+// Card Number now H, Stripe Product ID now S.
+const COL_H_INDEX = 7;   // 0-based — column H (card number)
+const COL_S_INDEX = 18;  // 0-based — column S (stripe_product_id)
 const COL_A_INDEX = 0;   // 0-based — column A (name) — for reporting
 
 /**
@@ -105,7 +105,7 @@ async function main() {
 
     const dataRes = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:U`,
+        range: `${SHEET_NAME}!A2:T`,
     });
     const rows = dataRes.data.values || [];
     console.log(`Singles rows: ${rows.length}`);
@@ -117,24 +117,24 @@ async function main() {
     for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const name = (row[COL_A_INDEX] || '').trim();
-        const colI = (row[COL_I_INDEX] || '').trim();
-        const colT = (row[COL_T_INDEX] || '').trim();
+        const colH = (row[COL_H_INDEX] || '').trim();
+        const colS = (row[COL_S_INDEX] || '').trim();
         if (!name) continue;  // blank row
 
-        if (colI) {
+        if (colH) {
             alreadyPopulated++;
             continue;
         }
-        if (!colT) {
+        if (!colS) {
             missingStripeId++;
-            if (VERBOSE) console.log(`  ⚠ row ${i + 2}: ${name} — no Stripe product ID (column T empty)`);
+            if (VERBOSE) console.log(`  ⚠ row ${i + 2}: ${name} — no Stripe product ID (column S empty)`);
             continue;
         }
-        candidates.push({ rowNumber: i + 2, name, stripeId: colT });
+        candidates.push({ rowNumber: i + 2, name, stripeId: colS });
     }
 
-    console.log(`\n  Already populated (column I non-empty): ${alreadyPopulated}`);
-    console.log(`  Skipped (no Stripe product ID in column T): ${missingStripeId}`);
+    console.log(`\n  Already populated (column H non-empty): ${alreadyPopulated}`);
+    console.log(`  Skipped (no Stripe product ID in column S): ${missingStripeId}`);
     console.log(`  Candidates to backfill: ${candidates.length}\n`);
 
     if (candidates.length === 0) {
@@ -218,9 +218,9 @@ async function main() {
     }
 
     // ─── Apply ───────────────────────────────────────────────────────────
-    console.log(`\nApplying ${writes.length} writes to column I...`);
+    console.log(`\nApplying ${writes.length} writes to column H...`);
     const data = writes.map((w) => ({
-        range: `${SHEET_NAME}!I${w.rowNumber}`,
+        range: `${SHEET_NAME}!H${w.rowNumber}`,
         values: [[w.parsedNumber]],
     }));
     await sheets.spreadsheets.values.batchUpdate({

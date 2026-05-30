@@ -5,7 +5,7 @@
  *   1. Required cells missing (name, price, stock, number, set name)
  *   2. Variant column K using set names / unknown labels
  *   3. R (API ID) doesn't resolve in pokemontcg.io
- *   4. R's set doesn't match column J (set code) — common when
+ *   4. R's set doesn't match column I (set name) — common when
  *      "SM Base Set" gets a Promo (smp) ID
  *   5. R's printed number doesn't match column H — common when H still
  *      has a game-series tag ("XY"/"SM") instead of a real number
@@ -46,16 +46,17 @@ const QUIET = args.includes('--quiet');
 const ROW_ARG = args.find((a) => a.startsWith('--row='));
 const ONLY_ROW = ROW_ARG ? parseInt(ROW_ARG.split('=')[1], 10) : null;
 
-// A-U schema (BIN Price inserted at F on 2026-05-25). Field semantics:
-// A name, B tcg-direct, C tcg-market, D price-charting, E auction-price,
-// F bin-price, G stock, H sale-price, I number, J set-name, K set-code,
-// L variant, M rarity, N game, O language, P image, Q release-date,
-// R artist, S api-id, T stripe-id, U notes.
+// A-T schema (TCGPlayer Direct/Market removed, Collectr inserted at C on
+// 2026-05-28). Field semantics:
+// A name, B price-charting, C collectr, D auction-price, E bin-price,
+// F stock, G sale-price, H number, I set-name, J set-code, K variant,
+// L rarity, M game, N language, O image, P release-date, Q artist,
+// R api-id, S stripe-id, T notes.
 const COL = {
     A: 0, B: 1, C: 2, D: 3, E: 4,
     F: 5, G: 6, H: 7, I: 8, J: 9,
     K: 10, L: 11, M: 12, N: 13, O: 14,
-    P: 15, Q: 16, R: 17, S: 18, T: 19, U: 20,
+    P: 15, Q: 16, R: 17, S: 18, T: 19,
 };
 
 // Recognized variant labels. Anything outside this set gets a warning so
@@ -196,7 +197,7 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:U`,
+        range: `${SHEET_NAME}!A2:T`,
     });
     const rows = res.data.values || [];
 
@@ -204,12 +205,12 @@ async function main() {
     let warnCount = 0;
     const setCache = new Map(); // setId → cards[]
 
-    // Pre-fetch every distinct set referenced by column S (Pokemon TCG
+    // Pre-fetch every distinct set referenced by column R (Pokemon TCG
     // API ID). Way fewer API hits than fetching each card individually —
     // 30-50 calls instead of 339 — and avoids the 429 rate-limit spam.
     const allSetIds = new Set();
     for (const row of rows) {
-        const apiId = (row[COL.S] || '').trim();
+        const apiId = (row[COL.R] || '').trim();
         const setId = setIdFromApiId(apiId);
         if (setId) allSetIds.add(setId);
     }
@@ -243,24 +244,24 @@ async function main() {
         const row = rows[i];
 
         const name = (row[COL.A] || '').trim();
-        const price = (row[COL.E] || '').trim();          // Auction Price
-        // row[COL.F] = BIN Price — informational, no lint required here.
-        const stock = (row[COL.G] || '').trim();
-        const number = (row[COL.I] || '').trim();
-        const setName = (row[COL.J] || '').trim();
-        const setCode = (row[COL.K] || '').trim();
-        const variant = (row[COL.L] || '').trim();
-        const releaseDate = (row[COL.Q] || '').trim();
-        const apiId = (row[COL.S] || '').trim();
+        const price = (row[COL.D] || '').trim();          // Auction Price
+        // row[COL.E] = BIN Price — informational, no lint required here.
+        const stock = (row[COL.F] || '').trim();
+        const number = (row[COL.H] || '').trim();
+        const setName = (row[COL.I] || '').trim();
+        const setCode = (row[COL.J] || '').trim();
+        const variant = (row[COL.K] || '').trim();
+        const releaseDate = (row[COL.P] || '').trim();
+        const apiId = (row[COL.R] || '').trim();
 
         const issues = [];
 
         // 1. Required cells
         if (!name)    issues.push({ sev: 'error', msg: 'A (name) is empty' });
-        if (!price)   issues.push({ sev: 'error', msg: 'E (price) is empty' });
-        if (!stock)   issues.push({ sev: 'error', msg: 'G (stock) is empty' });
-        if (!number)  issues.push({ sev: 'warn',  msg: 'I (card number) is empty — matching may pick wrong API entry' });
-        if (!setName) issues.push({ sev: 'warn',  msg: 'J (set name) is empty — matching may pick wrong set' });
+        if (!price)   issues.push({ sev: 'error', msg: 'D (price) is empty' });
+        if (!stock)   issues.push({ sev: 'error', msg: 'F (stock) is empty' });
+        if (!number)  issues.push({ sev: 'warn',  msg: 'H (card number) is empty — matching may pick wrong API entry' });
+        if (!setName) issues.push({ sev: 'warn',  msg: 'I (set name) is empty — matching may pick wrong set' });
 
         // 2. Variant label sanity
         if (variant && !KNOWN_VARIANTS.has(variant)) {

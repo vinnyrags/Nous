@@ -9,9 +9,9 @@
  *   - Update Stock: name (col A) + card number (col H, optional) + set
  *     name (col I). Refuses to match if multiple rows hit (caller fixes
  *     ambiguity) or zero rows hit.
- *   - Cards to Remove: name + set name + price (col E) — the "$20
+ *   - Cards to Remove: name + set name + price (col D) — the "$20
  *     variant" suffix in the input disambiguates by price.
- *   - New Cards: appends a new row with col A (name), E (price), F
+ *   - New Cards: appends a new row with col A (name), D (price), F
  *     (stock — defaulting to 1 when not specified), H (card number,
  *     best-effort regex), J (set code, best-effort).
  *
@@ -328,7 +328,7 @@ function findStockMatch(rows, target) {
 
 function findRemovalMatch(rows, target) {
   return rows
-    .map((r, i) => ({ index: i, name: (r[0] || '').trim(), set: (r[8] || '').trim(), price: (r[4] || '').trim() }))
+    .map((r, i) => ({ index: i, name: (r[0] || '').trim(), set: (r[8] || '').trim(), price: (r[3] || '').trim() }))
     .filter((r) => r.name.toLowerCase() === target.name.toLowerCase()
       && r.set === target.setName
       && r.price === target.price);
@@ -363,7 +363,7 @@ async function main() {
 
   const dataRes = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${SHEET_NAME}!A2:U`,
+    range: `${SHEET_NAME}!A2:T`,
   });
   const rows = dataRes.data.values || [];
   console.log(`  Sheet rows: ${rows.length}\n`);
@@ -391,9 +391,9 @@ async function main() {
       const m = matches[0];
       const sheetRow = m.index + 2;
       // Resolve delta against the current sheet value. Strip non-digit
-      // chars so any stray formatting in col G can't poison the math.
-      // (Stock col moved F→G in the 2026-05-25 schema.)
-      const currentRaw = (rows[m.index][6] || '0').toString();
+      // chars so any stray formatting in col F can't poison the math.
+      // (Stock col is F in the 2026-05-29 A-T schema.)
+      const currentRaw = (rows[m.index][5] || '0').toString();
       const currentStock = parseInt(currentRaw.replace(/[^0-9-]/g, ''), 10) || 0;
       const newStock = target.stockOp.type === 'delta'
         ? currentStock + target.stockOp.value
@@ -437,7 +437,7 @@ async function main() {
 
   // ─── New Cards ───────────────────────────────────────────────────────────
   console.log(`=== New Cards (planned) ===`);
-  const newRows = []; // raw row arrays A..U (A-U schema, 2026-05-25)
+  const newRows = []; // raw row arrays A..T (A-T schema, 2026-05-29)
   let newUnparsed = 0;
   for (const line of sections['New Cards']) {
     const parsed = parseNewCard(line);
@@ -446,16 +446,17 @@ async function main() {
       newUnparsed++;
       continue;
     }
-    // Build a 21-cell row (A-U). Only fill the columns we have data for.
-    // BIN Price (col F) is left blank — populated by a separate flow.
-    const row = new Array(21).fill('');
-    row[0] = parsed.name;          // A
-    row[4] = parsed.price;         // E Auction Price
-    row[6] = String(parsed.stock); // G Stock          (was F)
-    row[8] = parsed.cardNumber;    // I Card Number    (was H)
-    row[9] = parsed.setName;       // J Set Name       (was I)
-    row[10] = parsed.setCode;      // K Set Code       (was J)
-    row[11] = parsed.variant;      // L Variant        (was K)
+    // Build a 20-cell row (A-T schema, 2026-05-29). Only fill the columns
+    // we have data for. BIN Price (col E) is left blank — populated by a
+    // separate flow.
+    const row = new Array(20).fill('');
+    row[0] = parsed.name;          // A Card Name
+    row[3] = parsed.price;         // D Auction Price
+    row[5] = String(parsed.stock); // F Stock
+    row[7] = parsed.cardNumber;    // H Card Number
+    row[8] = parsed.setName;       // I Set Name
+    row[9] = parsed.setCode;       // J Set Code
+    row[10] = parsed.variant;      // K Variant
     newRows.push(row);
     console.log(`  ✓ ${parsed.name.padEnd(28)} | num=${parsed.cardNumber.padEnd(8)} | set=${(parsed.setName || '').padEnd(14)} | variant=${(parsed.variant || '').padEnd(14)} | price=${parsed.price.padEnd(5)} | stock=${parsed.stock}`);
   }
@@ -469,19 +470,19 @@ async function main() {
   // ─── EXECUTE ─────────────────────────────────────────────────────────────
   console.log(`🚀 APPLYING changes...\n`);
 
-  // 1) Stock updates — batch update column G by row number, plus optional
-  //    Auction Price (col E) when an "and change price to $X" clause was
-  //    parsed. (Stock col moved F→G in the 2026-05-25 schema.)
+  // 1) Stock updates — batch update column F (Stock) by row number, plus
+  //    optional Auction Price (col D) when an "and change price to $X" clause
+  //    was parsed. (A-T schema, 2026-05-29: Stock=F, Auction Price=D.)
   if (stockOps.length) {
     const data = [];
     for (const op of stockOps) {
       data.push({
-        range: `${SHEET_NAME}!G${op.rowNumber}`,
+        range: `${SHEET_NAME}!F${op.rowNumber}`,
         values: [[String(op.newStock)]],
       });
       if (op.newPrice) {
         data.push({
-          range: `${SHEET_NAME}!E${op.rowNumber}`,
+          range: `${SHEET_NAME}!D${op.rowNumber}`,
           values: [[op.newPrice]],
         });
       }
@@ -498,7 +499,7 @@ async function main() {
   if (newRows.length) {
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${SHEET_NAME}!A:U`,
+      range: `${SHEET_NAME}!A:T`,
       valueInputOption: 'RAW',
       insertDataOption: 'INSERT_ROWS',
       requestBody: { values: newRows },
