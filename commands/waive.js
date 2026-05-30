@@ -13,6 +13,7 @@ import config from '../config.js';
 import { purchases, shipping } from '../db.js';
 import { sendEmbed } from '../discord.js';
 import { getShippingRecord, recordShipping, isInternationalByEmail } from '../shipping.js';
+import { retrieveSessionWithPaymentIntent, createRefund } from '@itzenzottv/stripe-bridge';
 
 const stripe = new Stripe(config.STRIPE_SECRET_KEY);
 
@@ -41,9 +42,7 @@ async function handleWaive(message, args) {
         if (record.stripe_session_id) {
             try {
                 // Retrieve the checkout session to get the PaymentIntent
-                const session = await stripe.checkout.sessions.retrieve(record.stripe_session_id, {
-                    expand: ['payment_intent'],
-                });
+                const session = await retrieveSessionWithPaymentIntent(stripe, record.stripe_session_id);
 
                 const paymentIntent = session.payment_intent;
                 if (!paymentIntent || typeof paymentIntent === 'string') {
@@ -51,9 +50,9 @@ async function handleWaive(message, args) {
                 }
 
                 // Issue refund for the shipping amount
-                const refund = await stripe.refunds.create({
-                    payment_intent: paymentIntent.id,
-                    amount: record.amount,
+                const refund = await createRefund(stripe, {
+                    paymentIntentId: paymentIntent.id,
+                    amountCents: record.amount,
                 });
 
                 // Remove the shipping record

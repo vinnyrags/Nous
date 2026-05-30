@@ -22,6 +22,16 @@ export const BRIDGE_VERSION = '0.1.0';
 // objects in the Nous bot). Pure — no Stripe I/O, no DB, no magic defaults.
 export { buildCheckoutSessionParams } from './checkout/session-params.js';
 
+// Refund / charge / session retrieval primitives. Dependency-injected — each
+// takes a configured `stripe` client as its first arg (the package never
+// constructs one). Plain ESM, so a direct re-export is safe here.
+export {
+    resolveSessionIdFromCharge,
+    retrieveCharge,
+    retrieveSessionWithPaymentIntent,
+    createRefund,
+} from './refunds.js';
+
 // Stripe key mode detection (live/test/unknown). Imported as a CJS default
 // (the module.exports object) then re-exported as named bindings. NB: a
 // direct `export { … } from './stripe-mode.cjs'` works under plain Node but

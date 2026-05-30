@@ -12,6 +12,7 @@ import Stripe from 'stripe';
 import config from '../config.js';
 import { purchases } from '../db.js';
 import { propagateRefund } from '../lib/refund-propagator.js';
+import { retrieveSessionWithPaymentIntent, createRefund } from '@itzenzottv/stripe-bridge';
 
 const stripe = new Stripe(config.STRIPE_SECRET_KEY);
 
@@ -111,20 +112,14 @@ function parseAmountAndReason(refundArgs) {
  * skip-and-continue against multiple recent purchases.
  */
 async function attemptRefund(message, sessionId, purchase, amountCents, reason) {
-    const session = await stripe.checkout.sessions.retrieve(sessionId, {
-        expand: ['payment_intent'],
-    });
+    const session = await retrieveSessionWithPaymentIntent(stripe, sessionId);
 
     const paymentIntent = session.payment_intent;
     if (!paymentIntent || typeof paymentIntent === 'string') {
         throw new Error(`Could not retrieve payment intent for session ${sessionId}`);
     }
 
-    const refundParams = { payment_intent: paymentIntent.id };
-    if (amountCents) refundParams.amount = amountCents;
-    if (reason) refundParams.metadata = { reason };
-
-    const refund = await stripe.refunds.create(refundParams);
+    const refund = await createRefund(stripe, { paymentIntentId: paymentIntent.id, amountCents, reason });
     const refundDollars = (refund.amount / 100).toFixed(2);
     const isPartial = !!(amountCents && purchase?.amount && amountCents < purchase.amount);
 
