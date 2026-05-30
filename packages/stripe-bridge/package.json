@@ -1,0 +1,16 @@
+{
+  "name": "@itzenzottv/stripe-bridge",
+  "version": "0.1.0",
+  "description": "Standalone Stripe I/O bridge for the itzenzoTTV stack. Owns all Stripe SDK calls (checkout sessions, refunds, products, coupons, webhook verify) so the Nous bot keeps only domain logic. Theme: park/extract for the Whatnot pivot.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "stripe": "^21.0.0"
+  }
+}
