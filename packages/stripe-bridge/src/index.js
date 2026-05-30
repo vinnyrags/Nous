@@ -17,3 +17,8 @@
 // Package version marker — lets consumers/tests confirm the workspace link
 // resolves before any real surface is wired up.
 export const BRIDGE_VERSION = '0.1.0';
+
+// Stripe key mode detection (live/test/unknown). Re-exported so ESM
+// consumers can `import { detectMode } from '@itzenzottv/stripe-bridge'`;
+// CJS consumers use the `@itzenzottv/stripe-bridge/stripe-mode` subpath.
+export { detectMode, isLiveMode, isTestMode } from './stripe-mode.cjs';
