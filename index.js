@@ -39,6 +39,7 @@ import { initWelcome } from './commands/welcome.js';
 import { initMinecraftChannel, handleMinecraftReaction } from './commands/minecraft.js';
 import { initLfgChannel } from './commands/lfg.js';
 import { broadcastDiscordJoin } from './lib/activity-broadcaster.js';
+import { STRIPE_GATED_COMMANDS, isStripeGatedButton, handleStripeParked } from './lib/stripe-gate.js';
 // =========================================================================
 // Legacy !command text dispatcher removed 2026-05-03 — all ops commands
 // run as Discord slash commands now (see SLASH_HANDLERS below). Clean
@@ -187,6 +188,11 @@ client.on('interactionCreate', async (interaction) => {
         if (!handler) {
             return interaction.reply({ content: `No handler for /${interaction.commandName}`, ephemeral: true });
         }
+        // Stripe parked (Whatnot pivot) — gated checkout commands reply
+        // "paused" instead of constructing the Stripe SDK with no key.
+        if (STRIPE_GATED_COMMANDS.has(interaction.commandName) && await handleStripeParked(interaction)) {
+            return;
+        }
         try {
             await handler(interaction);
         } catch (e) {
@@ -208,6 +214,10 @@ client.on('interactionCreate', async (interaction) => {
         const { handleButtonInteraction, handleModalSubmit, handleSelectMenuInteraction } = await import('./commands/interactions.js');
 
         if (interaction.isButton()) {
+            // Stripe parked (Whatnot pivot) — buy buttons reply "paused".
+            if (isStripeGatedButton(interaction.customId) && await handleStripeParked(interaction)) {
+                return;
+            }
             await handleButtonInteraction(interaction);
         } else if (interaction.isStringSelectMenu()) {
             await handleSelectMenuInteraction(interaction);
@@ -282,7 +292,9 @@ client.once('ready', async () => {
 
     // Warm the Stripe product cache for autocomplete (non-blocking — if
     // Stripe is unreachable we fall back to empty suggestions, no crash)
-    productCache.refresh().catch(() => {});
+    if (config.STRIPE_ENABLED) {
+        productCache.refresh().catch(() => {});
+    }
 
     // Initialize community goals pinned message
     await initCommunityGoals();

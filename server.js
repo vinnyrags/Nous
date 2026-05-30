@@ -63,6 +63,33 @@ import {
 
 const app = express();
 
+// Stripe kill switch (Whatnot pivot — see config.STRIPE_ENABLED). When
+// Stripe is parked, every checkout and webhook path short-circuits before
+// its real handler (and before the raw-body parser) runs. Registered
+// immediately after app creation so it always precedes the handlers below.
+// The webhook 404s so Stripe treats the endpoint as gone; JSON checkout
+// endpoints return 503 {error:'stripe_disabled'}; GET redirect checkouts
+// return a short plain-text 503. Non-Stripe routes are untouched.
+if (!config.STRIPE_ENABLED) {
+    const stripeDisabledJson = (req, res) =>
+        res.status(503).json({ error: 'stripe_disabled' });
+    const stripeDisabledRedirect = (req, res) =>
+        res.status(503).type('text/plain').send(
+            'Checkout has moved to Whatnot — https://whatnot.com/user/itzenzottv'
+        );
+
+    app.all('/webhooks/stripe', (req, res) => res.sendStatus(404));
+
+    app.all('/web/battle/checkout', stripeDisabledJson);
+    app.all('/shipping/start-checkout', stripeDisabledJson);
+
+    app.all('/battle/checkout/:id', stripeDisabledRedirect);
+    app.all('/card-shop/checkout/:listingId', stripeDisabledRedirect);
+    app.all('/pull-box/checkout', stripeDisabledRedirect);
+    app.all('/product/checkout/:priceId', stripeDisabledRedirect);
+    app.all('/shipping/checkout', stripeDisabledRedirect);
+}
+
 /**
  * Stripe custom field for Discord username — only shown when the buyer
  * isn't already known via Discord (no ?user= query param).

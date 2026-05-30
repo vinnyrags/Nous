@@ -27,6 +27,7 @@ import request from 'supertest';
 
 vi.mock('../config.js', () => ({
     default: {
+        STRIPE_ENABLED: true,
         STRIPE_SECRET_KEY: 'sk_test_123',
         STRIPE_WEBHOOK_SECRET: '',
         DISCORD_BOT_TOKEN: 'fake',
