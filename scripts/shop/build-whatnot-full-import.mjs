@@ -5,8 +5,16 @@
  *
  * Source: /tmp/inventory.json (exported from WP via wp eval-file).
  *
+ * Card BIN pricing: every Buy-it-Now mode prices cards from the Singles
+ * sheet's BIN Price (col F) — the maintained BIN source of truth ($5 floor,
+ * tiered markup, and manual per-card overrides) — joined by Stripe product
+ * ID. NOT the Auction Price (col E) that lands in WP. --auction uses the
+ * raw auction price (starting bid). Named sealed products keep their single
+ * price in all modes.
+ *
  * Modes:
- *   default               Every in-stock item as Buy it Now, WP query order.
+ *   default               Every in-stock item as Buy it Now (cards at sheet
+ *                         BIN price, col F), WP query order.
  *                         Output: tmp/whatnot-full-import-{date}.csv
  *   --auction             Type=Auction (Price becomes starting bid), rows
  *                         sorted ascending by Price so a 10s-auction show
@@ -27,10 +35,12 @@
  *                          dropping a freshly-added set onto Whatnot without
  *                          re-uploading the whole catalog).
  *                          Output: tmp/whatnot-{mode}-subset-import-{date}.csv
+ *   --exclude-skus=id,...  Drop these WP post IDs from the output (inverse of
+ *                          --skus). Applies under every mode — used to omit
+ *                          "do not sell" cards (e.g. red-flagged sheet rows).
  *   --post-stream-bin     Same selection as --auction (cards + named sealed,
- *                         skips permanent-BIN), but Type=Buy it Now and card
- *                         prices use the tiered BIN markup ($1→$5; <$65→+$5;
- *                         ≥$65→+$10). Named sealed keep their single price.
+ *                         skips permanent-BIN), Type=Buy it Now, cards at the
+ *                         sheet BIN price (col F). Sorted ascending by Price.
  *                         Uploaded post-stream for unsold auction items.
  *                         Output: tmp/whatnot-post-stream-bin-import-{date}.csv
  *
@@ -42,10 +52,47 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { google } from 'googleapis';
 
 const ROOT = path.resolve(process.env.HOME, 'Projects/vinnyrags/websites');
 const INVENTORY = '/tmp/inventory.json';
 const today = new Date().toISOString().slice(0, 10);
+
+// Buy-it-Now listings price from the Singles sheet's BIN Price (col E),
+// NOT the Auction Price (col D) that lands in WP/Stripe. Col E is the
+// maintained BIN source of truth — it carries the $5 floor, the tiered
+// markup, AND ~26 manual per-card overrides (e.g. a $100-auction card
+// deliberately set to a $150 BIN). We join by Stripe product ID
+// (sheet col S == WP `stripe_product_id` meta, now in inventory.json).
+const SPREADSHEET_ID = '1erx1dUZ9YIwpg5xbXP_OFrE4i1dV97RoE7M0rsv_JkM';
+const CREDENTIALS_PATH = path.join(process.env.HOME, '.config/google/sheets-credentials.json');
+
+// stripe_product_id -> integer BIN dollars. Populated in main() for BIN
+// modes; left empty for --auction (which uses the raw auction price).
+let BIN_PRICE_BY_STRIPE = new Map();
+
+async function loadSheetBinPrices() {
+    const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
+    const auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    });
+    const sheets = google.sheets({ version: 'v4', auth });
+    const res = await sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Singles!A2:T',
+    });
+    const rows = res.data.values || [];
+    const map = new Map();
+    for (const r of rows) {
+        const stripeId = (r[18] || '').trim();           // col S (Stripe Product ID)
+        const bin = parseFloat(String(r[4] || '').replace(/[^0-9.]/g, '')); // col E (BIN Price)
+        if (stripeId && Number.isFinite(bin) && bin > 0) {
+            map.set(stripeId, Math.round(bin));
+        }
+    }
+    return map;
+}
 
 // Modes:
 //   default                  All in-stock items as Buy it Now.
@@ -67,6 +114,15 @@ const LISTING_TYPE = IS_AUCTION ? 'Auction' : 'Buy it Now';
 const SKUS_ARG = process.argv.find((a) => a.startsWith('--skus='));
 const ONLY_SKUS = SKUS_ARG
     ? new Set(SKUS_ARG.split('=')[1].split(',').map((s) => parseInt(s.trim(), 10)).filter(Number.isFinite))
+    : null;
+
+// --exclude-skus=id1,id2,... drops those WP post IDs from the output —
+// the inverse of --skus. Used to omit cards the operator has flagged
+// "do not sell" (e.g. red-highlighted rows in the Singles sheet) from an
+// otherwise-complete BIN/auction CSV. Applies under every mode.
+const EXCLUDE_ARG = process.argv.find((a) => a.startsWith('--exclude-skus='));
+const EXCLUDE_SKUS = EXCLUDE_ARG
+    ? new Set(EXCLUDE_ARG.split('=')[1].split(',').map((s) => parseInt(s.trim(), 10)).filter(Number.isFinite))
     : null;
 
 let outSuffix = 'full';
@@ -258,11 +314,27 @@ function buildCardRow(item) {
         `Ships in a penny sleeve + hard plastic toploader inside a bubble mailer with tracking. ` +
         `Smoke-free environment, packed within 1-2 business days of payment.`
     );
-    // In --post-stream-bin mode, card price is the tiered BIN markup over
-    // the Auction Price stored in WP. Other modes use the WP price as-is.
-    let priceCell = priceFromMeta(m.price);
-    if (IS_POST_STREAM_BIN && priceCell) {
-        priceCell = String(tieredBinFromAuction(parseInt(priceCell, 10)));
+    // Pricing:
+    //   --auction  → raw Auction Price (col E, the WP price) = starting bid.
+    //   BIN modes  → the sheet's BIN Price (col F), looked up by Stripe
+    //                product ID. Honors the $5 floor, tiered markup, and
+    //                manual per-card BIN overrides. Falls back to the tiered
+    //                formula over the auction price when the sheet lookup
+    //                misses (card not in sheet / blank stripe id / sheet
+    //                unavailable) so a BIN listing never ships at a sub-$5
+    //                auction price.
+    let priceCell;
+    if (IS_AUCTION) {
+        priceCell = priceFromMeta(m.price);
+    } else {
+        const sid = (m.stripe_product_id || '').trim();
+        const fromSheet = sid ? BIN_PRICE_BY_STRIPE.get(sid) : null;
+        if (fromSheet) {
+            priceCell = String(fromSheet);
+        } else {
+            const auction = priceFromMeta(m.price);
+            priceCell = auction ? String(tieredBinFromAuction(parseInt(auction, 10))) : '';
+        }
     }
 
     return {
@@ -316,6 +388,20 @@ function buildProductRow(item) {
 
 async function main() {
     const inv = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
+
+    // BIN listings price from the sheet's BIN Price column (col F). Load it
+    // up front for every Buy-it-Now output; --auction uses the raw auction
+    // price and skips this. A sheet/credentials failure is non-fatal — card
+    // BIN prices then fall back to the tiered formula (still floors at $5).
+    if (!IS_AUCTION) {
+        try {
+            BIN_PRICE_BY_STRIPE = await loadSheetBinPrices();
+            console.log(`Loaded ${BIN_PRICE_BY_STRIPE.size} BIN prices from the Singles sheet (col E).`);
+        } catch (e) {
+            console.warn(`⚠ Could not load sheet BIN prices (${e.message}); falling back to tiered formula over auction price.`);
+        }
+    }
+
     const builtRows = [];
     // Permanent-BIN items ride along in the auction CSV as a trailing
     // Buy it Now block so one pre-show import restores the always-on shop
@@ -330,6 +416,21 @@ async function main() {
         // --skus subset: drop everything not in the requested ID set before
         // any other handling so the skipped log only reflects subset items.
         if (ONLY_SKUS && !ONLY_SKUS.has(item.id)) continue;
+        // --exclude-skus: drop "do not sell" items (e.g. red-flagged rows).
+        if (EXCLUDE_SKUS && EXCLUDE_SKUS.has(item.id)) {
+            skipped.push({ id: item.id, title: item.title, reason: 'excluded (--exclude-skus)' });
+            continue;
+        }
+        // Never list a sold-out item. The WP inventory export already filters
+        // stock < 1, but guard here too so the builder stays correct against a
+        // stale or differently-produced inventory.json. An absent/blank
+        // stock_quantity is treated as in-stock (legacy rows default to 1);
+        // only an explicit 0/negative is dropped.
+        const stockRaw = (item.meta || {}).stock_quantity;
+        if (stockRaw !== '' && stockRaw != null && parseInt(stockRaw, 10) < 1) {
+            skipped.push({ id: item.id, title: item.title, reason: `out of stock (${stockRaw})` });
+            continue;
+        }
         if (!item.image) {
             skipped.push({ id: item.id, title: item.title, reason: 'no image' });
             continue;
@@ -417,6 +518,12 @@ async function main() {
     }
     if (genericCount) console.log(`  generic quick-pick auctions: ${genericCount}`);
     if (permanentCount) console.log(`  permanent-BIN items (trailing Buy it Now block): ${permanentCount}`);
+    if (EXCLUDE_SKUS) {
+        const dropped = skipped.filter((s) => s.reason.startsWith('excluded')).length;
+        const notHit = [...EXCLUDE_SKUS].filter((id) => !inv.some((x) => x.id === id));
+        console.log(`  excluded (--exclude-skus): ${dropped}/${EXCLUDE_SKUS.size} requested`);
+        if (notHit.length) console.log(`  note: ${notHit.length} excluded SKU(s) weren't in inventory anyway (out of stock): ${notHit.join(', ')}`);
+    }
     if (skipped.length) {
         console.log(`\nSkipped ${skipped.length}:`);
         for (const s of skipped) console.log(`  - #${s.id} (${s.reason}): ${s.title}`);
