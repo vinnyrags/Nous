@@ -11,7 +11,7 @@
 
 import express from 'express';
 import Stripe from 'stripe';
-import { buildCheckoutSessionParams } from '@itzenzottv/stripe-bridge';
+import { buildCheckoutSessionParams, preflightPriceActive } from '@itzenzottv/stripe-bridge';
 import config from './config.js';
 import { battles, cardListings, purchases, discordLinks, stripeEvents, activityEvents } from './db.js';
 import {
@@ -106,42 +106,13 @@ function customFieldsFor(discordUserId) {
     return discordUserId ? [] : [discordUsernameField];
 }
 
-/**
- * Pre-flight check: probe that a stored Stripe price ID is retrievable
- * AND active in the current mode. Mirrors the WP-side
- * StripeService::findFirstInactivePriceId defense — without it, a
- * battle row carrying a test-mode or archived price ID throws inside
- * stripe.checkout.sessions.create, the buyer sees a generic error, and
- * the actual cause is buried in catch logs.
- *
- * Returns null when OK, or `{ code, message }` when blocked.
- */
-async function preflightPriceActive(stripe, priceId) {
-    try {
-        const price = await stripe.prices.retrieve(priceId, { expand: ['product'] });
-        if (!price.active) {
-            return { code: 'price_inactive', message: 'The pack-battle product is archived in Stripe.' };
-        }
-        if (price.product && typeof price.product !== 'string' && !price.product.active) {
-            return { code: 'product_inactive', message: 'The pack-battle product is archived in Stripe.' };
-        }
-        return null;
-    } catch (e) {
-        if (
-            e?.type === 'StripeInvalidRequestError' &&
-            /No such price/i.test(e?.message || '')
-        ) {
-            return {
-                code: 'price_not_found',
-                message: 'The pack-battle product is not available in this Stripe mode.',
-                detail: e.message,
-            };
-        }
-        // Network / auth / rate limit — let the main createCheckoutSession
-        // call surface the real error through its own catch.
-        return null;
-    }
-}
+// Pre-flight price/product active check now lives in @itzenzottv/stripe-bridge
+// (preflightPriceActive). The battle checkout routes call it with pack-battle
+// copy. Mirrors the WP-side StripeService::findFirstInactivePriceId defense.
+const BATTLE_PREFLIGHT_MESSAGES = {
+    inactiveMessage: 'The pack-battle product is archived in Stripe.',
+    notFoundMessage: 'The pack-battle product is not available in this Stripe mode.',
+};
 
 // =========================================================================
 // Stripe webhook — needs raw body for signature verification
@@ -555,7 +526,7 @@ app.get('/battle/checkout/:id', async (req, res) => {
         const stripe = new Stripe(config.STRIPE_SECRET_KEY);
 
         // Pre-flight inactive-price check before any session work.
-        const preflight = await preflightPriceActive(stripe, battle.stripe_price_id);
+        const preflight = await preflightPriceActive(stripe, battle.stripe_price_id, BATTLE_PREFLIGHT_MESSAGES);
         if (preflight) {
             console.error(
                 `Battle checkout pre-flight blocked: ${preflight.code} | priceId=${battle.stripe_price_id} | battleId=${battle.id}`,
@@ -646,7 +617,7 @@ app.post('/web/battle/checkout', express.json(), async (req, res) => {
         const stripe = new Stripe(config.STRIPE_SECRET_KEY);
 
         // Pre-flight inactive-price check before any session work.
-        const preflight = await preflightPriceActive(stripe, battle.stripe_price_id);
+        const preflight = await preflightPriceActive(stripe, battle.stripe_price_id, BATTLE_PREFLIGHT_MESSAGES);
         if (preflight) {
             console.error(
                 `Web battle checkout pre-flight blocked: ${preflight.code} | priceId=${battle.stripe_price_id} | battleId=${battle.id}`,
