@@ -11,6 +11,7 @@
 
 import { EmbedBuilder } from 'discord.js';
 import Stripe from 'stripe';
+import { listSessionLineItems } from '@itzenzottv/stripe-bridge';
 import config from '../config.js';
 import { db, purchases, battles, cardListings, listSessions, discordLinks } from '../db.js';
 import { client, sendToChannel, sendEmbed, getMember, getGuild, findMemberByUsername, addRole, hasRole } from '../discord.js';
@@ -58,11 +59,7 @@ async function handleCheckoutCritical(session) {
         lineItems = JSON.parse(session.metadata.line_items);
     } else {
         try {
-            const fetched = await stripe.checkout.sessions.listLineItems(session.id, { limit: 100 });
-            lineItems = fetched.data.map((item) => ({
-                name: item.description || 'Unknown Product',
-                quantity: item.quantity || 1,
-            }));
+            lineItems = await listSessionLineItems(stripe, session.id, { limit: 100 });
         } catch (e) {
             console.error('Failed to fetch line items from Stripe:', e.message);
         }
