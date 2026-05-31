@@ -44,6 +44,11 @@ export { preflightPriceActive } from './prices.js';
 export { findPromotionCodeByCode, createCoupon, createPromotionCode } from './coupons.js';
 export { listCustomersByEmail } from './customers.js';
 
+// Webhook signature verification + line-item retrieval (I/O half only).
+// Dependency-injected (stripe first arg). The domain dispatch stays in Nous;
+// detangling the handlers into a callback bag is Phase 2 (deferred).
+export { constructWebhookEvent, listSessionLineItems } from './webhook.js';
+
 // Stripe key mode detection (live/test/unknown). Imported as a CJS default
 // (the module.exports object) then re-exported as named bindings. NB: a
 // direct `export { … } from './stripe-mode.cjs'` works under plain Node but

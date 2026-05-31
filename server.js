@@ -11,7 +11,7 @@
 
 import express from 'express';
 import Stripe from 'stripe';
-import { buildCheckoutSessionParams, preflightPriceActive } from '@itzenzottv/stripe-bridge';
+import { buildCheckoutSessionParams, preflightPriceActive, constructWebhookEvent } from '@itzenzottv/stripe-bridge';
 import config from './config.js';
 import { battles, cardListings, purchases, discordLinks, stripeEvents, activityEvents } from './db.js';
 import {
@@ -124,11 +124,11 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
     if (config.STRIPE_WEBHOOK_SECRET) {
         const stripe = new Stripe(config.STRIPE_SECRET_KEY);
         try {
-            event = stripe.webhooks.constructEvent(
-                req.body,
-                req.headers['stripe-signature'],
-                config.STRIPE_WEBHOOK_SECRET
-            );
+            event = constructWebhookEvent(stripe, {
+                payload: req.body,
+                signature: req.headers['stripe-signature'],
+                secret: config.STRIPE_WEBHOOK_SECRET,
+            });
         } catch (e) {
             console.error('Stripe signature verification failed:', e.message);
             return res.status(400).send('Invalid signature');
