@@ -38,6 +38,12 @@ export {
 export { listActiveProducts } from './products.js';
 export { preflightPriceActive } from './prices.js';
 
+// Coupons / promotion codes + customer lookup. Dependency-injected (stripe
+// first arg). All discount math + display formatting stays in the Nous
+// command; the apiVersion pin is a caller-side client-construction concern.
+export { findPromotionCodeByCode, createCoupon, createPromotionCode } from './coupons.js';
+export { listCustomersByEmail } from './customers.js';
+
 // Stripe key mode detection (live/test/unknown). Imported as a CJS default
 // (the module.exports object) then re-exported as named bindings. NB: a
 // direct `export { … } from './stripe-mode.cjs'` works under plain Node but

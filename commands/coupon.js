@@ -9,6 +9,7 @@
 
 import Stripe from 'stripe';
 import { EmbedBuilder } from 'discord.js';
+import { findPromotionCodeByCode, createCoupon, createPromotionCode } from '@itzenzottv/stripe-bridge';
 import config from '../config.js';
 import { coupons } from '../db.js';
 import { broadcastCouponDrop } from '../lib/activity-broadcaster.js';
@@ -85,10 +86,9 @@ async function handleCreate(message, args) {
         const stripe = new Stripe(config.STRIPE_SECRET_KEY, { apiVersion: '2024-12-18.acacia' });
 
         // Check if promo code already exists in Stripe
-        const existing = await stripe.promotionCodes.list({ code, limit: 1 });
+        const promo = await findPromotionCodeByCode(stripe, code);
 
-        if (existing.data.length > 0) {
-            const promo = existing.data[0];
+        if (promo) {
             const existingCoupon = promo.coupon;
 
             // Check if the existing discount matches what was requested
@@ -118,14 +118,10 @@ async function handleCreate(message, args) {
         }
 
         // Create the coupon in Stripe
-        const coupon = await stripe.coupons.create(couponParams);
+        const coupon = await createCoupon(stripe, couponParams);
 
         // Create the customer-facing promotion code
-        const promoParams = { coupon: coupon.id, code };
-        if (maxRedemptions) {
-            promoParams.max_redemptions = maxRedemptions;
-        }
-        const promoCode = await stripe.promotionCodes.create(promoParams);
+        const promoCode = await createPromotionCode(stripe, { couponId: coupon.id, code, maxRedemptions });
 
         const usesLabel = maxRedemptions ? `${maxRedemptions} use${maxRedemptions !== 1 ? 's' : ''}` : 'unlimited';
 
@@ -157,13 +153,12 @@ async function handleActivate(message, code) {
     // Verify the promo code exists and is active in Stripe
     try {
         const stripe = new Stripe(config.STRIPE_SECRET_KEY, { apiVersion: '2024-12-18.acacia' });
-        const promoCodes = await stripe.promotionCodes.list({ code, limit: 1, expand: ['data.coupon'] });
+        const promo = await findPromotionCodeByCode(stripe, code, { expandCoupon: true });
 
-        if (promoCodes.data.length === 0) {
+        if (!promo) {
             return message.reply(`No promotion code \`${code}\` found in Stripe. Create one first with \`!coupon create ${code} <discount>\`.`);
         }
 
-        const promo = promoCodes.data[0];
         if (!promo.active) {
             return message.reply(`Promotion code \`${code}\` exists but is deactivated in Stripe.`);
         }

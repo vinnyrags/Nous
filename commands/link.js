@@ -8,6 +8,7 @@
  */
 
 import Stripe from 'stripe';
+import { listCustomersByEmail } from '@itzenzottv/stripe-bridge';
 import config from '../config.js';
 import { purchases } from '../db.js';
 
@@ -32,9 +33,9 @@ async function handleLink(message, args) {
     // Validate email exists in Stripe
     try {
         const stripe = new Stripe(config.STRIPE_SECRET_KEY);
-        const customers = await stripe.customers.list({ email, limit: 1 });
+        const customers = await listCustomersByEmail(stripe, email);
 
-        if (!customers.data.length) {
+        if (!customers.length) {
             return message.channel.send(
                 `❌ <@${message.author.id}> No purchases found for that email. Make sure you're using the same email you used at checkout.`
             );
