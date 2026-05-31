@@ -11,7 +11,7 @@
 
 import express from 'express';
 import Stripe from 'stripe';
-import { buildCheckoutSessionParams, preflightPriceActive, constructWebhookEvent } from '@itzenzottv/stripe-bridge';
+import { buildCheckoutSessionParams, preflightPriceActive, constructWebhookEvent, createCheckoutSession } from '@itzenzottv/stripe-bridge';
 import config from './config.js';
 import { battles, cardListings, purchases, discordLinks, stripeEvents, activityEvents } from './db.js';
 import {
@@ -560,7 +560,7 @@ app.get('/battle/checkout/:id', async (req, res) => {
         });
 
         applyTosMetadata(params, discordUserId);
-        const session = await stripe.checkout.sessions.create(params);
+        const session = await createCheckoutSession(stripe, params);
 
         res.redirect(303, session.url);
     } catch (e) {
@@ -664,7 +664,7 @@ app.post('/web/battle/checkout', express.json(), async (req, res) => {
             metadata: { ...params.metadata },
         };
 
-        const session = await stripe.checkout.sessions.create(params);
+        const session = await createCheckoutSession(stripe, params);
         res.json({ url: session.url });
     } catch (e) {
         console.error(
@@ -744,7 +744,7 @@ app.get('/card-shop/checkout/:listingId', async (req, res) => {
         });
 
         applyTosMetadata(params, discordUserId);
-        const session = await stripe.checkout.sessions.create(params);
+        const session = await createCheckoutSession(stripe, params);
 
         cardListings.setStripeSessionId.run(session.id, listing.id);
         res.redirect(303, session.url);
@@ -822,7 +822,7 @@ app.get('/pull-box/checkout', async (req, res) => {
         });
 
         applyTosMetadata(params, discordUserId);
-        const session = await stripe.checkout.sessions.create(params);
+        const session = await createCheckoutSession(stripe, params);
         res.redirect(303, session.url);
     } catch (e) {
         console.error('Pull-box checkout error:', e.message);
@@ -864,7 +864,7 @@ app.get('/product/checkout/:priceId', async (req, res) => {
         });
 
         applyTosMetadata(params, discordUserId);
-        const session = await stripe.checkout.sessions.create(params);
+        const session = await createCheckoutSession(stripe, params);
 
         res.redirect(303, session.url);
     } catch (e) {
@@ -924,7 +924,7 @@ app.get('/shipping/checkout', async (req, res) => {
             receiptEmail: link ? link.customer_email : null,
         });
         applyTosMetadata(params, req.query.user);
-        const session = await stripe.checkout.sessions.create(params);
+        const session = await createCheckoutSession(stripe, params);
 
         res.redirect(303, session.url);
     } catch (e) {
@@ -1064,7 +1064,7 @@ app.post('/shipping/start-checkout', express.json(), async (req, res) => {
             params.metadata = { ...params.metadata, ...tosMetadata };
             params.payment_intent_data = { metadata: { ...params.metadata } };
         }
-        const session = await stripe.checkout.sessions.create(params);
+        const session = await createCheckoutSession(stripe, params);
 
         res.json({ status: 'checkout', url: session.url, amount_cents: amountCents });
     } catch (e) {

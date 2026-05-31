@@ -22,6 +22,10 @@ export const BRIDGE_VERSION = '0.1.0';
 // objects in the Nous bot). Pure — no Stripe I/O, no DB, no magic defaults.
 export { buildCheckoutSessionParams } from './checkout/session-params.js';
 
+// Checkout Session creation — the thin .create() call behind the boundary,
+// so checkout routes never touch the Stripe SDK directly. DI (stripe first arg).
+export { createCheckoutSession } from './checkout/create.js';
+
 // Refund / charge / session retrieval primitives. Dependency-injected — each
 // takes a configured `stripe` client as its first arg (the package never
 // constructs one). Plain ESM, so a direct re-export is safe here.
