@@ -23,7 +23,8 @@
  *   D Auction Price (authoritative → Stripe default_price)
  *   E BIN Price (informational; not pushed to Stripe)
  *   F Stock                N Language
- *   G Sale Price (opt)     O Image URL
+ *   G Auction Price Override (Whatnot CSV only; not pushed to Stripe)
+ *                          O Image URL
  *   H Card Number          P Release Date (YYYY-MM-DD)
  *   I Set Name             Q Artist
  *   J Set Code             R Pokemon TCG API ID
@@ -209,7 +210,8 @@ async function main() {
         const priceStr = (row[COL.D] || '').trim();          // Auction Price → Stripe default_price
         // row[COL.E] = BIN Price — read by a separate pipeline, ignored here.
         const stock = (row[COL.F] || '1').trim();
-        const salePriceStr = (row[COL.G] || '').trim();
+        // col G is the Whatnot Auction Price Override (read by
+        // build-whatnot-full-import.mjs) — NOT a Stripe sale price. Not read here.
         const cardNumber = (row[COL.H] || '').trim();
         const setName = (row[COL.I] || '').trim();
         const setCode = (row[COL.J] || '').trim();
@@ -354,38 +356,18 @@ async function main() {
             writebacks.push({ rowIndex: sheetRow, productId: product.id });
         }
 
-        // Sale price handling (column G)
-        const salePriceAmount = priceToCents(salePriceStr);
-        if (!isNaN(salePriceAmount) && salePriceAmount > 0) {
-            const prices = await stripe.prices.list({
-                product: product.id,
-                active: true,
-                limit: 10,
-            });
-
-            let salePriceObj = prices.data.find(
-                (p) => p.unit_amount === salePriceAmount && p.id !== defaultPriceId,
-            );
-            if (!salePriceObj) {
-                salePriceObj = await stripe.prices.create({
-                    product: product.id,
-                    unit_amount: salePriceAmount,
-                    currency: 'usd',
-                });
-                console.log(`    Sale price created: $${(salePriceAmount / 100).toFixed(2)}`);
-            }
-
-            await stripe.products.update(product.id, {
-                metadata: { ...metadata, sale_price_id: salePriceObj.id },
-            });
-            console.log(`    Sale active: $${(salePriceAmount / 100).toFixed(2)}`);
-        } else if (existingProduct) {
+        // Sale prices retired: column G was repurposed from Sale Price to the
+        // Whatnot Auction Price Override, so this script no longer creates
+        // Stripe sale prices. Clear any sale_price_id left on existing products
+        // by the old feature so the storefront stops showing a stale sale.
+        // Idempotent — once cleared it won't fire again.
+        if (existingProduct) {
             const currentMeta = existingProduct.metadata || {};
             if (currentMeta.sale_price_id) {
                 await stripe.products.update(product.id, {
                     metadata: { ...metadata, sale_price_id: '' },
                 });
-                console.log(`    Sale ended`);
+                console.log(`    Sale cleared (col G repurposed — no longer a sale price)`);
             }
         }
     }

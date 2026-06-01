@@ -5,16 +5,22 @@
  *
  * Source: /tmp/inventory.json (exported from WP via wp eval-file).
  *
- * Card BIN pricing: every Buy-it-Now mode prices cards from the Singles
- * sheet's BIN Price (col F) — the maintained BIN source of truth ($5 floor,
- * tiered markup, and manual per-card overrides) — joined by Stripe product
- * ID. NOT the Auction Price (col E) that lands in WP. --auction uses the
- * raw auction price (starting bid). Named sealed products keep their single
- * price in all modes.
+ * Card pricing (joined to the Singles sheet by Stripe product ID):
+ *   - Auction Price Override (col G), when a row has one, REPLACES both
+ *     prices: --auction uses it as the starting bid, and every BIN mode
+ *     prices it at ceil(override × 0.95) — the override, 5% off, rounded up.
+ *   - With no override, BIN modes price from the maintained BIN Price (col E:
+ *     $5 floor, tiered markup, manual per-card overrides) and --auction uses
+ *     the maintained Auction Price (col D) read straight from the sheet (WP's
+ *     price meta can lag the sheet between syncs; sheet is the source of truth).
+ *   - Red-filled sheet rows are "do not sell" and are dropped from every CSV.
+ *     (SOLD rows are dark grey and already vanish via stock = 0 upstream.)
+ * Named sealed products aren't in the sheet and keep their single price in
+ * all modes.
  *
  * Modes:
  *   default               Every in-stock item as Buy it Now (cards at sheet
- *                         BIN price, col F), WP query order.
+ *                         BIN price, col E), WP query order.
  *                         Output: tmp/whatnot-full-import-{date}.csv
  *   --auction             Type=Auction (Price becomes starting bid), rows
  *                         sorted ascending by Price so a 10s-auction show
@@ -36,11 +42,13 @@
  *                          re-uploading the whole catalog).
  *                          Output: tmp/whatnot-{mode}-subset-import-{date}.csv
  *   --exclude-skus=id,...  Drop these WP post IDs from the output (inverse of
- *                          --skus). Applies under every mode — used to omit
- *                          "do not sell" cards (e.g. red-flagged sheet rows).
+ *                          --skus). Applies under every mode. Supplements the
+ *                          automatic red-row exclusion — for products or for
+ *                          red rows whose col-S Stripe id is blank (unmatchable
+ *                          by join).
  *   --post-stream-bin     Same selection as --auction (cards + named sealed,
  *                         skips permanent-BIN), Type=Buy it Now, cards at the
- *                         sheet BIN price (col F). Sorted ascending by Price.
+ *                         sheet BIN price (col E). Sorted ascending by Price.
  *                         Uploaded post-stream for unsold auction items.
  *                         Output: tmp/whatnot-post-stream-bin-import-{date}.csv
  *
@@ -58,40 +66,88 @@ const ROOT = path.resolve(process.env.HOME, 'Projects/vinnyrags/websites');
 const INVENTORY = '/tmp/inventory.json';
 const today = new Date().toISOString().slice(0, 10);
 
-// Buy-it-Now listings price from the Singles sheet's BIN Price (col E),
-// NOT the Auction Price (col D) that lands in WP/Stripe. Col E is the
-// maintained BIN source of truth — it carries the $5 floor, the tiered
-// markup, AND ~26 manual per-card overrides (e.g. a $100-auction card
-// deliberately set to a $150 BIN). We join by Stripe product ID
-// (sheet col S == WP `stripe_product_id` meta, now in inventory.json).
+// Singles sheet column map (0-indexed within A2:T):
+//   D(3) Auction Price · E(4) BIN Price · G(6) Auction Price Override
+//   S(18) Stripe Product ID — the join key (== WP `stripe_product_id`).
+//
+// Pricing source of truth:
+//   • Auction starting bid = the WP/Stripe Auction Price (col D), UNLESS the
+//     row has an Auction Price Override (col G) — then col G wins.
+//   • Buy-it-Now = the maintained BIN Price (col E: $5 floor, tiered markup,
+//     ~26 manual per-card overrides), UNLESS the row has a col-G override, in
+//     which case BIN = ceil(override × 0.95) (the override, 5% off, rounded up
+//     to a whole dollar).
+//   • Red-filled rows are "do not sell" and drop out of every CSV. (SOLD rows
+//     are dark grey and already vanish via stock = 0 in the WP export upstream.)
+// We join by Stripe product ID (sheet col S == WP `stripe_product_id` meta,
+// carried in inventory.json).
 const SPREADSHEET_ID = '1erx1dUZ9YIwpg5xbXP_OFrE4i1dV97RoE7M0rsv_JkM';
 const CREDENTIALS_PATH = path.join(process.env.HOME, '.config/google/sheets-credentials.json');
 
-// stripe_product_id -> integer BIN dollars. Populated in main() for BIN
-// modes; left empty for --auction (which uses the raw auction price).
-let BIN_PRICE_BY_STRIPE = new Map();
+// Populated in main() from the Singles sheet, keyed by Stripe product ID.
+let AUCTION_BY_STRIPE = new Map();     // col D → float auction-price dollars
+let BIN_PRICE_BY_STRIPE = new Map();   // col E → integer BIN dollars
+let OVERRIDE_BY_STRIPE = new Map();    // col G → float auction-override dollars
+let DO_NOT_SELL_STRIPE = new Set();    // red-filled rows — excluded everywhere
+let OVERRIDE_APPLIED = 0;              // count of emitted cards priced off col G
 
-async function loadSheetBinPrices() {
+// A row is "do not sell" when its fill is red-dominant: red clearly above both
+// green and blue, with green ≈ blue. The green ≈ blue guard keeps orange/brown/
+// yellow highlights (which have green ≫ blue) and the grey SOLD rows (equal
+// channels) from tripping it. Robust across light-red → saturated-red shades.
+function isRedFill(color) {
+    if (!color) return false;
+    const r = color.red ?? 0, g = color.green ?? 0, b = color.blue ?? 0;
+    return r >= 0.4 && (r - g) > 0.15 && (r - b) > 0.15 && Math.abs(g - b) < 0.18;
+}
+
+async function loadSheetData() {
     const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
     const auth = new google.auth.GoogleAuth({
         credentials,
         scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
     });
     const sheets = google.sheets({ version: 'v4', auth });
-    const res = await sheets.spreadsheets.values.get({
+    // Need cell fill colors (red-row detection) alongside values, so pull the
+    // grid rather than just values: formattedValue for the data cells plus
+    // effectiveFormat background color, which resolves the rendered color
+    // regardless of how it was set.
+    const res = await sheets.spreadsheets.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: 'Singles!A2:T',
+        ranges: ['Singles!A2:T'],
+        includeGridData: true,
+        fields: 'sheets.data.rowData.values(formattedValue,effectiveFormat.backgroundColor,effectiveFormat.backgroundColorStyle)',
     });
-    const rows = res.data.values || [];
-    const map = new Map();
-    for (const r of rows) {
-        const stripeId = (r[18] || '').trim();           // col S (Stripe Product ID)
-        const bin = parseFloat(String(r[4] || '').replace(/[^0-9.]/g, '')); // col E (BIN Price)
-        if (stripeId && Number.isFinite(bin) && bin > 0) {
-            map.set(stripeId, Math.round(bin));
+    const rowData = res.data.sheets?.[0]?.data?.[0]?.rowData || [];
+    const auction = new Map(), bin = new Map(), override = new Map(), doNotSell = new Set();
+    let redCount = 0, redNoStripe = 0;
+    for (const row of rowData) {
+        const cells = row.values || [];
+        const text = (i) => (cells[i]?.formattedValue || '').trim();
+        const num = (i) => parseFloat(text(i).replace(/[^0-9.]/g, ''));
+        const stripeId = text(18);                  // col S (Stripe Product ID)
+        if (!text(0) && !stripeId) continue;        // skip fully-blank trailing rows
+
+        // Red fill on any cell across the row = do-not-sell.
+        const isRed = cells.some((c) => {
+            const ef = c?.effectiveFormat;
+            return isRedFill(ef?.backgroundColorStyle?.rgbColor || ef?.backgroundColor);
+        });
+        if (isRed) {
+            redCount++;
+            if (stripeId) doNotSell.add(stripeId);
+            else redNoStripe++;
         }
+
+        if (!stripeId) continue;
+        const aucVal = num(3);                      // col D (Auction Price)
+        if (Number.isFinite(aucVal) && aucVal > 0) auction.set(stripeId, aucVal);
+        const binVal = num(4);                      // col E (BIN Price)
+        if (Number.isFinite(binVal) && binVal > 0) bin.set(stripeId, Math.round(binVal));
+        const ovrVal = num(6);                       // col G (Auction Price Override)
+        if (Number.isFinite(ovrVal) && ovrVal > 0) override.set(stripeId, ovrVal);
     }
-    return map;
+    return { auction, bin, override, doNotSell, redCount, redNoStripe };
 }
 
 // Modes:
@@ -133,10 +189,9 @@ if (ONLY_SKUS) outSuffix += '-subset';
 const OUT_CSV = path.join(ROOT, `tmp/whatnot-${outSuffix}-import-${today}.csv`);
 
 // Tiered BIN markup over Auction Price. Matches the formula used to
-// populate column F in the Singles sheet so the generated CSV stays in
-// sync with sheet values without reading the sheet directly. Applied
-// only to cards in --post-stream-bin mode; named sealed products use
-// their single price unchanged.
+// populate column E (BIN Price) in the Singles sheet, so a card with no
+// sheet BIN lookup still gets a sane BIN. Fallback only — used when the
+// sheet lookup misses; named sealed products use their single price unchanged.
 //
 // Rule (updated 2026-05-26): anything under $5 floors to a flat $5 (no
 // +$5 added) — keeps cheap commons shippable without an outsized markup.
@@ -180,6 +235,12 @@ const LIGHT_PRODUCT_IDS = new Set([
 // per-card listing. Auction-mode only; they sort in by Price with the rest.
 // Images are branded $2/$5/$10/$15/$20/$25 graphics hosted in WP media.
 const GENERIC_AUCTION_ROWS = [
+    {
+        price: 1,
+        sku: 'QUICK-1',
+        title: 'itzenzoTTV $1 Quick Auction — Pokémon Single',
+        image: 'https://vincentragosta.io/wp-content/uploads/2026/05/quick-auction-1.png',
+    },
     {
         price: 2,
         sku: 'QUICK-2',
@@ -314,25 +375,35 @@ function buildCardRow(item) {
         `Ships in a penny sleeve + hard plastic toploader inside a bubble mailer with tracking. ` +
         `Smoke-free environment, packed within 1-2 business days of payment.`
     );
-    // Pricing:
-    //   --auction  → raw Auction Price (col E, the WP price) = starting bid.
-    //   BIN modes  → the sheet's BIN Price (col F), looked up by Stripe
-    //                product ID. Honors the $5 floor, tiered markup, and
-    //                manual per-card BIN overrides. Falls back to the tiered
-    //                formula over the auction price when the sheet lookup
-    //                misses (card not in sheet / blank stripe id / sheet
-    //                unavailable) so a BIN listing never ships at a sub-$5
-    //                auction price.
+    // Pricing (joined to the Singles sheet by Stripe product ID):
+    //   Auction Price Override (col G), when set, REPLACES both prices:
+    //     --auction → starting bid = the override.
+    //     BIN modes → BIN = ceil(override × 0.95) (override, 5% off, whole $).
+    //   With no override:
+    //     --auction → the maintained Auction Price (col D) from the SHEET — the
+    //                 source of truth. WP's price meta can lag the sheet between
+    //                 syncs, so we read the sheet directly and fall back to WP
+    //                 price only when the card isn't in the sheet.
+    //     BIN modes → the sheet's maintained BIN Price (col E). Falls back to
+    //                 the tiered formula over the auction price when the sheet
+    //                 lookup misses (card not in sheet / blank stripe id /
+    //                 sheet unavailable) so a BIN never ships at a sub-$5 bid.
+    const sid = (m.stripe_product_id || '').trim();
+    const override = sid ? OVERRIDE_BY_STRIPE.get(sid) : null;
+    const sheetAuction = sid ? AUCTION_BY_STRIPE.get(sid) : null;
+    const auctionBase = override ?? sheetAuction ?? m.price;
+    if (override) OVERRIDE_APPLIED++;
     let priceCell;
     if (IS_AUCTION) {
-        priceCell = priceFromMeta(m.price);
+        priceCell = priceFromMeta(auctionBase);
+    } else if (override) {
+        priceCell = String(Math.max(1, Math.ceil(override * 0.95)));
     } else {
-        const sid = (m.stripe_product_id || '').trim();
         const fromSheet = sid ? BIN_PRICE_BY_STRIPE.get(sid) : null;
         if (fromSheet) {
             priceCell = String(fromSheet);
         } else {
-            const auction = priceFromMeta(m.price);
+            const auction = priceFromMeta(auctionBase);
             priceCell = auction ? String(tieredBinFromAuction(parseInt(auction, 10))) : '';
         }
     }
@@ -389,17 +460,23 @@ function buildProductRow(item) {
 async function main() {
     const inv = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
 
-    // BIN listings price from the sheet's BIN Price column (col F). Load it
-    // up front for every Buy-it-Now output; --auction uses the raw auction
-    // price and skips this. A sheet/credentials failure is non-fatal — card
-    // BIN prices then fall back to the tiered formula (still floors at $5).
-    if (!IS_AUCTION) {
-        try {
-            BIN_PRICE_BY_STRIPE = await loadSheetBinPrices();
-            console.log(`Loaded ${BIN_PRICE_BY_STRIPE.size} BIN prices from the Singles sheet (col E).`);
-        } catch (e) {
-            console.warn(`⚠ Could not load sheet BIN prices (${e.message}); falling back to tiered formula over auction price.`);
+    // Pull the Singles sheet up front for EVERY mode now: it carries the BIN
+    // prices (col E), the Auction Price Overrides (col G, which apply to both
+    // auction and BIN), and the red "do not sell" rows. A sheet/credentials
+    // failure is non-fatal — BIN falls back to the tiered formula, and
+    // overrides + red-row exclusion simply don't apply (use --exclude-skus).
+    try {
+        const sheet = await loadSheetData();
+        AUCTION_BY_STRIPE = sheet.auction;
+        BIN_PRICE_BY_STRIPE = sheet.bin;
+        OVERRIDE_BY_STRIPE = sheet.override;
+        DO_NOT_SELL_STRIPE = sheet.doNotSell;
+        console.log(`Singles sheet: ${sheet.auction.size} auction prices (col D), ${sheet.bin.size} BIN prices (col E), ${sheet.override.size} auction overrides (col G), ${sheet.doNotSell.size} red "do not sell" rows.`);
+        if (sheet.redNoStripe) {
+            console.warn(`  ⚠ ${sheet.redNoStripe} red row(s) have no Stripe Product ID (col S) — can't match them to inventory; drop by WP id via --exclude-skus if they're live.`);
         }
+    } catch (e) {
+        console.warn(`⚠ Could not load the Singles sheet (${e.message}); BIN falls back to the tiered formula, no overrides, no red-row exclusion.`);
     }
 
     const builtRows = [];
@@ -416,9 +493,18 @@ async function main() {
         // --skus subset: drop everything not in the requested ID set before
         // any other handling so the skipped log only reflects subset items.
         if (ONLY_SKUS && !ONLY_SKUS.has(item.id)) continue;
-        // --exclude-skus: drop "do not sell" items (e.g. red-flagged rows).
+        // --exclude-skus: manual drop list by WP id. Supplements the automatic
+        // red-row exclusion below — use it for products or for red rows whose
+        // Stripe id (col S) is blank so they can't be matched by join.
         if (EXCLUDE_SKUS && EXCLUDE_SKUS.has(item.id)) {
             skipped.push({ id: item.id, title: item.title, reason: 'excluded (--exclude-skus)' });
+            continue;
+        }
+        // Red "do not sell" rows in the Singles sheet (matched by Stripe
+        // product ID) drop out of every CSV — auction and BIN alike.
+        const itemStripeId = ((item.meta || {}).stripe_product_id || '').trim();
+        if (itemStripeId && DO_NOT_SELL_STRIPE.has(itemStripeId)) {
+            skipped.push({ id: item.id, title: item.title, reason: 'do not sell (red row in sheet)' });
             continue;
         }
         // Never list a sold-out item. The WP inventory export already filters
@@ -510,6 +596,13 @@ async function main() {
     console.log(`Wrote ${rows.length - 1} rows to ${OUT_CSV} (Type=${typeLabel}${sortNote})`);
     console.log(`  cards:    ${cardCount}`);
     console.log(`  products: ${productCount}`);
+    if (OVERRIDE_APPLIED) {
+        console.log(`  auction-price overrides applied (col G): ${OVERRIDE_APPLIED}`);
+    }
+    const redDropped = skipped.filter((s) => s.reason.startsWith('do not sell')).length;
+    if (redDropped) {
+        console.log(`  red "do not sell" rows excluded: ${redDropped} (listed under Skipped below)`);
+    }
     if (ONLY_SKUS) {
         const emittedIds = new Set(finalRows.map((r) => parseInt(r.SKU, 10)));
         const missing = [...ONLY_SKUS].filter((id) => !emittedIds.has(id));

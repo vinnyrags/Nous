@@ -48,11 +48,9 @@ Done: 1 created, 0 updated, 0 skipped.`;
 describe('parsePushNewProducts', () => {
     it('parses created products with name, price, and category', () => {
         const output = `  Updated: Existing Product [pokemon, ENG, stock:1]
+    Sale cleared (col G repurposed — no longer a sale price)
   Created: Pokemon Astral Radiance ($10.99) [pokemon, ENG, stock:12]
-    Sale price created: $9.99
-    Sale active: $9.99
   Created: Pokemon Lost Origin ($15.99) [pokemon, ENG, stock:7]
-    Sale price created: $13.99
 
 Done: 2 created, 1 updated, 0 skipped.`;
 
