@@ -51,6 +51,16 @@
  *                         sheet BIN price (col E). Sorted ascending by Price.
  *                         Uploaded post-stream for unsold auction items.
  *                         Output: tmp/whatnot-post-stream-bin-import-{date}.csv
+ *   --bin-show            BIN-format live show: every in-stock card as Buy it
+ *                         Now priced at its EFFECTIVE AUCTION price (col G
+ *                         override, else col D — NOT the col-E BIN price, no
+ *                         markup/discount), every in-stock product as Buy it
+ *                         Now at its normal price (permanent-BIN items ride in
+ *                         the main queue, not a trailing block), PLUS the
+ *                         generic quick-pick rows kept as Type=Auction. Whole
+ *                         CSV sorted ascending by Price so the show flows
+ *                         cheap → chase like an auction night.
+ *                         Output: tmp/whatnot-bin-show-import-{date}.csv
  *
  * Shipping profile rules:
  *   card                              -> "0-1 oz"
@@ -160,6 +170,10 @@ async function loadSheetData() {
 const IS_AUCTION = process.argv.includes('--auction');
 const IS_PERMANENT_BIN_ONLY = process.argv.includes('--permanent-bin-only');
 const IS_POST_STREAM_BIN = process.argv.includes('--post-stream-bin');
+// BIN-format live show: cards as Buy it Now at their effective AUCTION price
+// (col G override else col D), products as BIN at their normal price, generic
+// quick-picks kept as real auctions. See the mode docs at the top of the file.
+const IS_BIN_SHOW = process.argv.includes('--bin-show');
 const LISTING_TYPE = IS_AUCTION ? 'Auction' : 'Buy it Now';
 
 // --skus=id1,id2,... restricts output to those WP post IDs only — an ad-hoc
@@ -185,6 +199,7 @@ let outSuffix = 'full';
 if (IS_AUCTION) outSuffix = 'auction';
 else if (IS_PERMANENT_BIN_ONLY) outSuffix = 'permanent-bin';
 else if (IS_POST_STREAM_BIN) outSuffix = 'post-stream-bin';
+else if (IS_BIN_SHOW) outSuffix = 'bin-show';
 if (ONLY_SKUS) outSuffix += '-subset';
 const OUT_CSV = path.join(ROOT, `tmp/whatnot-${outSuffix}-import-${today}.csv`);
 
@@ -232,8 +247,9 @@ const LIGHT_PRODUCT_IDS = new Set([
 
 // Generic "quick pick" filler auctions — high-quantity placeholder listings
 // at fixed price points the operator fires off mid-show without prepping a
-// per-card listing. Auction-mode only; they sort in by Price with the rest.
-// Images are branded $2/$5/$10/$15/$20/$25 graphics hosted in WP media.
+// per-card listing. Included by --auction AND --bin-show (always Type=Auction,
+// even in the otherwise-BIN show CSV); they sort in by Price with the rest.
+// Images are branded $1–$35 graphics hosted in WP media (uploads/2026/05).
 const GENERIC_AUCTION_ROWS = [
     {
         price: 1,
@@ -276,6 +292,18 @@ const GENERIC_AUCTION_ROWS = [
         sku: 'QUICK-25',
         title: 'itzenzoTTV $25 Quick Auction — Pokémon Single',
         image: 'https://vincentragosta.io/wp-content/uploads/2026/05/quick-auction-25.png',
+    },
+    {
+        price: 30,
+        sku: 'QUICK-30',
+        title: 'itzenzoTTV $30 Quick Auction — Pokémon Single',
+        image: 'https://vincentragosta.io/wp-content/uploads/2026/05/quick-auction-30.png',
+    },
+    {
+        price: 35,
+        sku: 'QUICK-35',
+        title: 'itzenzoTTV $35 Quick Auction — Pokémon Single',
+        image: 'https://vincentragosta.io/wp-content/uploads/2026/05/quick-auction-35.png',
     },
 ];
 
@@ -394,7 +422,10 @@ function buildCardRow(item) {
     const auctionBase = override ?? sheetAuction ?? m.price;
     if (override) OVERRIDE_APPLIED++;
     let priceCell;
-    if (IS_AUCTION) {
+    if (IS_AUCTION || IS_BIN_SHOW) {
+        // --bin-show lists the card as Buy it Now at the EXACT effective
+        // auction price (no col-E lookup, no ×0.95 discount) — same price
+        // resolution as --auction, only the listing Type differs.
         priceCell = priceFromMeta(auctionBase);
     } else if (override) {
         priceCell = String(Math.max(1, Math.ceil(override * 0.95)));
@@ -564,10 +595,12 @@ async function main() {
         }
     }
 
-    // Generic quick-pick filler auctions — auction CSV only. Appended before
-    // the sort so they slot into the ascending-price queue naturally.
+    // Generic quick-pick filler auctions — auction and bin-show CSVs. They
+    // stay Type=Auction even in the BIN show (the operator still fires them
+    // off as live auctions between BIN sales). Appended before the sort so
+    // they slot into the ascending-price queue naturally.
     let genericCount = 0;
-    if (IS_AUCTION && !ONLY_SKUS) {
+    if ((IS_AUCTION || IS_BIN_SHOW) && !ONLY_SKUS) {
         for (const g of GENERIC_AUCTION_ROWS) {
             builtRows.push(buildGenericAuctionRow(g));
             genericCount++;
@@ -575,10 +608,11 @@ async function main() {
     }
 
     // Auction shows run cheap → expensive so the chat warms up on $1 commons
-    // and the energy climaxes on chase cards. Post-stream BIN uses the same
-    // ascending sort for consistency between the two CSV uploads — easier
-    // to scan and match rows across files. Default BIN mode keeps WP order.
-    if (IS_AUCTION || IS_POST_STREAM_BIN) {
+    // and the energy climaxes on chase cards. Post-stream BIN and the BIN
+    // show use the same ascending sort for consistency — the BIN show flows
+    // like an auction night, just with fixed prices. Default BIN mode keeps
+    // WP order.
+    if (IS_AUCTION || IS_POST_STREAM_BIN || IS_BIN_SHOW) {
         builtRows.sort((a, b) => Number(a.Price) - Number(b.Price));
     }
 
@@ -591,8 +625,10 @@ async function main() {
     const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
     fs.writeFileSync(OUT_CSV, csv + '\n');
 
-    const typeLabel = IS_POST_STREAM_BIN ? 'Buy it Now (BIN markup applied)' : LISTING_TYPE;
-    const sortNote = (IS_AUCTION || IS_POST_STREAM_BIN) ? ', sorted ascending by Price' : '';
+    const typeLabel = IS_POST_STREAM_BIN ? 'Buy it Now (BIN markup applied)'
+        : IS_BIN_SHOW ? 'Buy it Now @ effective auction price (+ quick-picks as Auction)'
+        : LISTING_TYPE;
+    const sortNote = (IS_AUCTION || IS_POST_STREAM_BIN || IS_BIN_SHOW) ? ', sorted ascending by Price' : '';
     console.log(`Wrote ${rows.length - 1} rows to ${OUT_CSV} (Type=${typeLabel}${sortNote})`);
     console.log(`  cards:    ${cardCount}`);
     console.log(`  products: ${productCount}`);
