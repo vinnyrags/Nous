@@ -57,9 +57,12 @@
  *                         markup/discount), every in-stock product as Buy it
  *                         Now at its normal price (permanent-BIN items ride in
  *                         the main queue, not a trailing block), PLUS the
- *                         generic quick-pick rows kept as Type=Auction. Whole
- *                         CSV sorted ascending by Price so the show flows
- *                         cheap → chase like an auction night.
+ *                         generic quick-pick rows kept as Type=Auction. Cards
+ *                         whose effective auction price is $1 are OMITTED —
+ *                         the operator moves those through the $1 quick-pick
+ *                         auction live instead. Whole CSV sorted ascending by
+ *                         Price so the show flows cheap → chase like an
+ *                         auction night.
  *                         Output: tmp/whatnot-bin-show-import-{date}.csv
  *
  * Shipping profile rules:
@@ -572,6 +575,14 @@ async function main() {
             skipped.push({ id: item.id, title: item.title, reason: 'no price' });
             continue;
         }
+        // --bin-show: cards whose EFFECTIVE auction price (col G override or
+        // col D) lands at $1 are deliberately omitted — the operator moves
+        // those live through the $1 quick-pick auction instead of listing a
+        // pile of one-dollar BINs.
+        if (IS_BIN_SHOW && item.post_type === 'card' && Number(row.Price) === 1) {
+            skipped.push({ id: item.id, title: item.title, reason: '$1 effective auction price — sold via the $1 quick auction on stream' });
+            continue;
+        }
         // Surface anything Whatnot will require manual cleanup on:
         // non-Pokemon products forced to the Pokémon Cards subcategory,
         // and prices that were rounded away from their WP source value.
@@ -638,6 +649,10 @@ async function main() {
     const redDropped = skipped.filter((s) => s.reason.startsWith('do not sell')).length;
     if (redDropped) {
         console.log(`  red "do not sell" rows excluded: ${redDropped} (listed under Skipped below)`);
+    }
+    const dollarOneDropped = skipped.filter((s) => s.reason.startsWith('$1 effective')).length;
+    if (dollarOneDropped) {
+        console.log(`  $1 cards omitted (BIN show — run them via the $1 quick auction): ${dollarOneDropped}`);
     }
     if (ONLY_SKUS) {
         const emittedIds = new Set(finalRows.map((r) => parseInt(r.SKU, 10)));
