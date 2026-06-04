@@ -118,7 +118,6 @@ export default {
         SHIPPING_LABELS: '1496219727801094359',
         MINECRAFT: optional('DISCORD_MINECRAFT_CHANNEL_ID'),
         LOOKING_FOR_GROUP: '1488041106519232574',
-        HOW_IT_WORKS: '1489138364463448195',
         // #duck-race — dedicated channel for the nightly duck race roster
         // embed + animated race. Env-driven (optional) so dev environments
         // without the channel set up fall through to the existing #queue

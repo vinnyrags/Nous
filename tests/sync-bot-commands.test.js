@@ -29,7 +29,6 @@ function createMockChannel(existingEmbeds = []) {
 
 let mockBotCommandsChannel;
 let mockFlowChannel;
-let mockHowItWorksChannel;
 
 vi.mock('../discord.js', () => ({
     client: {
@@ -48,7 +47,6 @@ vi.mock('../config.js', () => ({
         CHANNELS: {
             BOT_COMMANDS: 'bot-commands-id',
             LIVESTREAM_FLOW: 'livestream-flow-id',
-            HOW_IT_WORKS: 'how-it-works-id',
         },
     },
 }));
@@ -66,13 +64,6 @@ vi.mock('../livestream-flow.js', () => ({
     ],
 }));
 
-vi.mock('../how-it-works.js', () => ({
-    default: [
-        { title: 'HIW 1', description: 'HIW Desc 1', color: 0xceff00 },
-        { title: 'HIW 2', description: 'HIW Desc 2', color: 0xceff00 },
-    ],
-}));
-
 const { client, getChannel } = await import('../discord.js');
 const { syncBotCommands } = await import('../sync-bot-commands.js');
 
@@ -80,17 +71,14 @@ beforeEach(() => {
     vi.clearAllMocks();
     mockBotCommandsChannel = createMockChannel([]);
     mockFlowChannel = createMockChannel([]);
-    mockHowItWorksChannel = createMockChannel([]);
 });
 
-function setupChannels(botEmbeds = [], flowEmbeds = [], howItWorksEmbeds = []) {
+function setupChannels(botEmbeds = [], flowEmbeds = []) {
     mockBotCommandsChannel = createMockChannel(botEmbeds);
     mockFlowChannel = createMockChannel(flowEmbeds);
-    mockHowItWorksChannel = createMockChannel(howItWorksEmbeds);
     getChannel.mockImplementation((key) => {
         if (key === 'BOT_COMMANDS') return mockBotCommandsChannel;
         if (key === 'LIVESTREAM_FLOW') return mockFlowChannel;
-        if (key === 'HOW_IT_WORKS') return mockHowItWorksChannel;
         return undefined;
     });
 }
@@ -102,11 +90,7 @@ describe('syncBotCommands', () => {
                 { title: 'Title 1', description: 'Desc 1' },
                 { title: 'Title 2', description: 'Desc 2' },
             ],
-            [{ title: 'Flow 1', description: 'Flow Desc 1' }],
-            [
-                { title: 'HIW 1', description: 'HIW Desc 1' },
-                { title: 'HIW 2', description: 'HIW Desc 2' },
-            ]
+            [{ title: 'Flow 1', description: 'Flow Desc 1' }]
         );
 
         await syncBotCommands();
@@ -117,7 +101,6 @@ describe('syncBotCommands', () => {
         }
         expect(mockBotCommandsChannel.send).not.toHaveBeenCalled();
         expect(mockFlowChannel.send).not.toHaveBeenCalled();
-        expect(mockHowItWorksChannel.send).not.toHaveBeenCalled();
     });
 
     it('edits embeds that have changed', async () => {
@@ -165,13 +148,12 @@ describe('syncBotCommands', () => {
     });
 
     it('handles empty channel (posts all messages)', async () => {
-        setupChannels([], [], []);
+        setupChannels([], []);
 
         await syncBotCommands();
 
         expect(mockBotCommandsChannel.send).toHaveBeenCalledTimes(2);
         expect(mockFlowChannel.send).toHaveBeenCalledTimes(1);
-        expect(mockHowItWorksChannel.send).toHaveBeenCalledTimes(2);
     });
 
     it('skips sync when channel not found', async () => {
@@ -203,41 +185,4 @@ describe('syncBotCommands', () => {
         expect(mockBotCommandsChannel._messages[1].edit).toHaveBeenCalled();
     });
 
-    it('syncs the #how-it-works channel from canonical content', async () => {
-        // Existing channel has stale embeds — one matches, one doesn't,
-        // and there's an extra to be deleted.
-        setupChannels(
-            [{ title: 'Title 1', description: 'Desc 1' }, { title: 'Title 2', description: 'Desc 2' }],
-            [{ title: 'Flow 1', description: 'Flow Desc 1' }],
-            [
-                { title: 'HIW 1', description: 'HIW Desc 1' },           // matches → no edit
-                { title: 'HIW 2', description: 'STALE' },                // mismatched → edit
-                { title: 'Old refunds embed', description: 'gone' },     // extra → delete
-            ]
-        );
-
-        await syncBotCommands();
-
-        expect(mockHowItWorksChannel._messages[0].edit).not.toHaveBeenCalled();
-        expect(mockHowItWorksChannel._messages[1].edit).toHaveBeenCalled();
-        expect(mockHowItWorksChannel._messages[2].delete).toHaveBeenCalled();
-        expect(mockHowItWorksChannel.send).not.toHaveBeenCalled();
-    });
-
-    it('skips #how-it-works gracefully when channel ID is unset', async () => {
-        // Bot-commands and livestream-flow are configured, but HOW_IT_WORKS is not.
-        mockBotCommandsChannel = createMockChannel([]);
-        mockFlowChannel = createMockChannel([]);
-        getChannel.mockImplementation((key) => {
-            if (key === 'BOT_COMMANDS') return mockBotCommandsChannel;
-            if (key === 'LIVESTREAM_FLOW') return mockFlowChannel;
-            return undefined; // HOW_IT_WORKS not found
-        });
-
-        await syncBotCommands();
-
-        // The configured channels still sync; the missing one is a no-op.
-        expect(mockBotCommandsChannel.send).toHaveBeenCalledTimes(2);
-        expect(mockFlowChannel.send).toHaveBeenCalledTimes(1);
-    });
 });
