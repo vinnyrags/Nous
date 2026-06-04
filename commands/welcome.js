@@ -11,10 +11,13 @@ import { client, getChannel } from '../discord.js';
 
 function buildWelcomeEmbed() {
     return new EmbedBuilder()
-        .setTitle('Welcome to itzenzo.tv')
+        .setTitle('Welcome to itzenzoTTV')
         .setDescription(
             'Cards. Games. Community. Welcome to the family.\n\n' +
-            'Card nights run **Monday, Tuesday, and Wednesday at 8PM EST** — Pokemon and anime, opened live, with pack battles, duck races, and pull boxes. ' +
+            'Live shows run on **Whatnot** — pack openings, $1-start singles auctions, and vintage hits at ' +
+            '[whatnot.com/user/itzenzottv](https://whatnot.com/user/itzenzottv). Going-live links land in the announcements channel. ' +
+            'Between shows, browse the full singles catalog at [itzenzo.tv/cards](https://itzenzo.tv/cards) and the always-on ' +
+            '[Whatnot shop](https://whatnot.com/user/itzenzottv/shop). ' +
             'Gaming is informal — we play most days, timing varies, drop into the looking-for-group channel for whatever is running. ' +
             '**After Dark** (18+) is coming soon. Yu-Gi-Oh inventory rolls in as it lands.'
         )
@@ -23,25 +26,22 @@ function buildWelcomeEmbed() {
             {
                 name: 'Key Channels',
                 value: [
-                    '<#' + config.CHANNELS.ANNOUNCEMENTS + '> — Going-live, drops, flash sales',
-                    '<#' + config.CHANNELS.PACK_BATTLES + '> — Buy a pack, winner takes all cards',
-                    '<#' + config.CHANNELS.CARD_SHOP + '> — Individual card sales',
-                    '<#' + config.CHANNELS.QUEUE + '> — Live queue and duck race roster',
-                    '<#' + config.CHANNELS.ORDER_FEED + '> — Real-time order notifications',
+                    '<#' + config.CHANNELS.ANNOUNCEMENTS + '> — Whatnot show announcements, drops, news',
+                    '<#' + config.CHANNELS.HOW_IT_WORKS + '> — How buying, shipping, and refunds work',
+                    '<#' + config.CHANNELS.LOOKING_FOR_GROUP + '> — Find a squad, see what we\'re playing',
                 ].join('\n'),
             },
             {
                 name: 'Link Your Account',
                 value:
-                    'If you made a purchase and did not enter your Discord name at checkout, click the **Link Account** button below and enter the email you used at checkout. ' +
-                    'This connects your purchases to your Discord profile so your name appears in the queue, order feed, and duck race roster. ' +
-                    'You also get automatic role upgrades as you hit purchase milestones.',
+                    'Bought from the shop before? Click the **Link Account** button below and enter the email you used at checkout. ' +
+                    'This connects your purchase history to your Discord profile and unlocks automatic role upgrades as you hit purchase milestones.',
             },
             {
                 name: 'Get Verified',
                 value:
                     'Head to <#1488183429437853696> and react to get the **Xipe** role. ' +
-                    'This unlocks full server access — giveaways, pack battles, pull boxes, community channels, and more. ' +
+                    'This unlocks full server access — cards, gaming, and community channels. ' +
                     'Once verified, check out <#1488041097153347704> to pick up additional roles. The **Ena** role gates After Dark content (coming soon — grab the role now to be ready when it launches).',
             },
             {
@@ -51,7 +51,7 @@ function buildWelcomeEmbed() {
                     '**Long** — 5+ purchases (loyalty recognized)',
             },
         )
-        .setFooter({ text: 'itzenzo.tv — Cards. Games. Community.' });
+        .setFooter({ text: 'itzenzoTTV — Cards. Games. Community.' });
 }
 
 function buildWelcomeButton() {

@@ -53,9 +53,9 @@ function buildLfgEmbed() {
             {
                 name: 'Stream schedule',
                 value: [
-                    '**Mon, Tue, Wed** — Card nights at 8PM EST (Pokemon + anime)',
+                    '**Card shows** — live on [Whatnot](https://whatnot.com/user/itzenzottv), usually weeknights around 8PM EST',
                     '**Gaming** — informal, most days, varied timing — drop into this channel for whatever\'s running',
-                    `See ${announcementsMention} for going-live alerts.`,
+                    `See ${announcementsMention} for going-live links.`,
                 ].join('\n'),
             },
         )
