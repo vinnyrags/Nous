@@ -27,6 +27,13 @@ if (!APPLICATION_ID) {
 // handler — defense in depth.
 const ADMIN_ONLY = PermissionFlagsBits.Administrator;
 
+// Whatnot-era active set (2026-06-05): commerce moved to Whatnot, Stripe
+// retired — the Stripe-dependent commands (/hype /sell /list /sold /pull
+// /coupon /refund /waive /link /sync), self-fulfilment shipping commands
+// (/tracking /shipments /shipping /shipping-audit /intl /intl-ship
+// /dropped-off), and queue-driven stream mechanics (/queue /duckrace
+// /battle /snapshot /capture) are deregistered. Handlers remain in the
+// codebase and are still reachable via /op if ever needed.
 const commands = [
     // /op <command-string> — universal dispatcher
     new SlashCommandBuilder()
@@ -35,20 +42,9 @@ const commands = [
         .setDefaultMemberPermissions(ADMIN_ONLY)
         .addStringOption((opt) => opt
             .setName('command')
-            .setDescription('e.g. "queue close", "battle start \\"My Product\\" 20", "sync"')
+            .setDescription('e.g. "giveaway status", "nous status"')
             .setRequired(true)
             .setAutocomplete(true)),
-
-    // /queue open|close|history|next|skip
-    new SlashCommandBuilder()
-        .setName('queue')
-        .setDescription('Manage the live queue session')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addSubcommand((s) => s.setName('open').setDescription('Open a fresh queue session'))
-        .addSubcommand((s) => s.setName('close').setDescription('Close the active session'))
-        .addSubcommand((s) => s.setName('history').setDescription('Show recent sessions'))
-        .addSubcommand((s) => s.setName('next').setDescription('Advance to the next entry'))
-        .addSubcommand((s) => s.setName('skip').setDescription('Skip the current entry')),
 
     // /reset (button confirmation in handler)
     new SlashCommandBuilder()
@@ -68,64 +64,6 @@ const commands = [
         .setDescription('Announce stream end; clear live state')
         .setDefaultMemberPermissions(ADMIN_ONLY),
 
-    // /sync mode:full|stripe
-    new SlashCommandBuilder()
-        .setName('sync')
-        .setDescription('Sync catalog (Sheets → Stripe → WordPress)')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addStringOption((opt) => opt
-            .setName('mode')
-            .setDescription('full = Sheets+Stripe+WP (default), stripe = Stripe-only (faster)')
-            .addChoices(
-                { name: 'full (default)', value: 'full' },
-                { name: 'stripe', value: 'stripe' },
-            )),
-
-    // /hype — pre-stream hype, looks up products in Stripe
-    new SlashCommandBuilder()
-        .setName('hype')
-        .setDescription('Pre-stream hype: look up products in Stripe, post embed + checkout URLs')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addStringOption((o) => o
-            .setName('products')
-            .setDescription('Comma-separated product names — autocomplete suggests as you type')
-            .setRequired(true)
-            .setAutocomplete(true)),
-
-    // /battle <subcommand>
-    new SlashCommandBuilder()
-        .setName('battle')
-        .setDescription('Manage pack battles')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addSubcommand((s) => s
-            .setName('start')
-            .setDescription('Start a new pack battle')
-            .addStringOption((o) => o.setName('product').setDescription('Product name').setRequired(true).setAutocomplete(true))
-            .addIntegerOption((o) => o.setName('max').setDescription('Max entries (default 20, capped at 50)').setMinValue(2).setMaxValue(50)))
-        .addSubcommand((s) => s.setName('close').setDescription('Close the active battle'))
-        .addSubcommand((s) => s.setName('cancel').setDescription('Cancel the active battle'))
-        .addSubcommand((s) => s.setName('status').setDescription('Show battle status'))
-        .addSubcommand((s) => s
-            .setName('winner')
-            .setDescription('Declare the battle winner')
-            .addUserOption((o) => o.setName('user').setDescription('Winning user').setRequired(true))),
-
-    // /duckrace <subcommand>
-    new SlashCommandBuilder()
-        .setName('duckrace')
-        .setDescription('Run the duck race for the active queue')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addSubcommand((s) => s.setName('show').setDescription('Show current duck race state'))
-        .addSubcommand((s) => s.setName('start').setDescription('Start the duck race'))
-        .addSubcommand((s) => s
-            .setName('winner')
-            .setDescription('Declare the duck race winner')
-            .addUserOption((o) => o.setName('user').setDescription('Winning user').setRequired(true)))
-        .addSubcommand((s) => s
-            .setName('pick')
-            .setDescription('Owner-only: rig the duck race outcome')
-            .addUserOption((o) => o.setName('user').setDescription('User to pick').setRequired(true))),
-
     // /spin — pick giveaway winner
     new SlashCommandBuilder()
         .setName('spin')
@@ -138,21 +76,6 @@ const commands = [
             .addUserOption((o) => o.setName('user').setDescription('User to pick').setRequired(true))),
 
     // ----- Phase C — mid/low frequency native commands -----
-
-    // /link — user-facing (everyone), buyer self-link email ↔ Discord ID
-    new SlashCommandBuilder()
-        .setName('link')
-        .setDescription('Link your email to your Discord ID for purchase tracking')
-        .addStringOption((o) => o.setName('email').setDescription('Email used at checkout').setRequired(true)),
-
-    // /pull — pull-box admin (perpetual single-box model)
-    new SlashCommandBuilder()
-        .setName('pull')
-        .setDescription('Pull-box admin (chase-hit reset + replenish only)')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addSubcommand((s) => s.setName('reset').setDescription('Chase prize hit — close current box and start a fresh batch'))
-        .addSubcommand((s) => s.setName('replenish').setDescription('Add N slots to the active pull box without resetting')
-            .addStringOption((o) => o.setName('args').setDescription('Slots to add (e.g., 25)'))),
 
     // /giveaway — giveaway lifecycle
     new SlashCommandBuilder()
@@ -169,140 +92,12 @@ const commands = [
         .addSubcommand((s) => s.setName('clean').setDescription('Clean up old giveaways'))
         .addSubcommand((s) => s.setName('off').setDescription('Disable giveaway feature')),
 
-    // /coupon — coupon lifecycle
-    new SlashCommandBuilder()
-        .setName('coupon')
-        .setDescription('Coupon lifecycle')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addSubcommand((s) => s
-            .setName('create')
-            .setDescription('Create a new coupon')
-            .addIntegerOption((o) => o.setName('amount').setDescription('Discount amount in cents').setRequired(true).setMinValue(1)))
-        .addSubcommand((s) => s.setName('off').setDescription('Disable active coupon'))
-        .addSubcommand((s) => s.setName('status').setDescription('Show active coupon')),
-
-    // /tracking — package tracking
-    new SlashCommandBuilder()
-        .setName('tracking')
-        .setDescription('Package tracking lookup')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addSubcommand((s) => s
-            .setName('lookup')
-            .setDescription('Look up tracking by reference')
-            .addStringOption((o) => o.setName('reference').setDescription('Order ref or Stripe session id').setRequired(true)))
-        .addSubcommand((s) => s.setName('list').setDescription('List recent tracked shipments'))
-        .addSubcommand((s) => s.setName('clear').setDescription('Clear tracking cache')),
-
-    // /shipments — shipments overview
-    new SlashCommandBuilder()
-        .setName('shipments')
-        .setDescription('Shipments overview')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addSubcommand((s) => s.setName('list').setDescription('List all recent shipments'))
-        .addSubcommand((s) => s.setName('status').setDescription('Status summary'))
-        .addSubcommand((s) => s.setName('ready').setDescription('Shipments ready to send')),
-
-    // /refund — process a Stripe refund
-    new SlashCommandBuilder()
-        .setName('refund')
-        .setDescription('Refund a Stripe checkout session')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addSubcommand((s) => s
-            .setName('full')
-            .setDescription('Full refund of a session')
-            .addStringOption((o) => o.setName('session').setDescription('Stripe checkout session id').setRequired(true)))
-        .addSubcommand((s) => s
-            .setName('partial')
-            .setDescription('Partial refund of a session')
-            .addStringOption((o) => o.setName('session').setDescription('Stripe checkout session id').setRequired(true))
-            .addIntegerOption((o) => o.setName('amount').setDescription('Refund amount in cents').setRequired(true).setMinValue(1))),
-
-    // /waive — waive shipping fee for a buyer
-    new SlashCommandBuilder()
-        .setName('waive')
-        .setDescription('Waive shipping fee for a buyer')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addUserOption((o) => o.setName('user').setDescription('Buyer to waive shipping for').setRequired(true)),
-
-    // /snapshot — capture state
-    new SlashCommandBuilder()
-        .setName('snapshot')
-        .setDescription('Snapshot bot state')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addStringOption((o) => o.setName('action').setDescription('Optional action (e.g. save, restore)')),
-
-    // /capture — capture stream moments
-    new SlashCommandBuilder()
-        .setName('capture')
-        .setDescription('Capture a stream moment')
-        .setDefaultMemberPermissions(ADMIN_ONLY),
-
     // /nous — bot self-management
     new SlashCommandBuilder()
         .setName('nous')
         .setDescription('Bot self-management')
         .setDefaultMemberPermissions(ADMIN_ONLY)
         .addStringOption((o) => o.setName('action').setDescription('Action to perform')),
-
-    // /shipping — shipping admin
-    new SlashCommandBuilder()
-        .setName('shipping')
-        .setDescription('Shipping admin')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addStringOption((o) => o.setName('args').setDescription('Action + args')),
-
-    // /shipping-audit — audit shipping coverage
-    new SlashCommandBuilder()
-        .setName('shipping-audit')
-        .setDescription('Audit shipping coverage / payments')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addStringOption((o) => o.setName('args').setDescription('Optional args')),
-
-    // /intl — international shipping
-    new SlashCommandBuilder()
-        .setName('intl')
-        .setDescription('International shipping admin')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addSubcommand((s) => s.setName('show').setDescription('Show current intl-flagged buyers'))
-        .addSubcommand((s) => s.setName('list').setDescription('List intl buyers')),
-
-    // /intl-ship — auto-DM intl buyers shipping difference
-    new SlashCommandBuilder()
-        .setName('intl-ship')
-        .setDescription('Auto-DM intl buyers about shipping difference')
-        .setDefaultMemberPermissions(ADMIN_ONLY),
-
-    // /dropped-off — mark batch dropped off at carrier
-    new SlashCommandBuilder()
-        .setName('dropped-off')
-        .setDescription('Mark batch dropped off at carrier')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addBooleanOption((o) => o.setName('intl').setDescription('International batch')),
-
-    // /sell — list a card for sale
-    new SlashCommandBuilder()
-        .setName('sell')
-        .setDescription('List a card for sale')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addStringOption((o) => o.setName('args').setDescription('Card details (depends on legacy syntax)').setRequired(true)),
-
-    // /list — list-session lifecycle
-    new SlashCommandBuilder()
-        .setName('list')
-        .setDescription('List-session lifecycle')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addSubcommand((s) => s.setName('open').setDescription('Open a list session')
-            .addStringOption((o) => o.setName('args').setDescription('Session details')))
-        .addSubcommand((s) => s.setName('add').setDescription('Add a card to active list session')
-            .addStringOption((o) => o.setName('args').setDescription('Card details').setRequired(true)))
-        .addSubcommand((s) => s.setName('close').setDescription('Close active list session')),
-
-    // /sold — mark a listing sold
-    new SlashCommandBuilder()
-        .setName('sold')
-        .setDescription('Mark a listing as sold')
-        .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addStringOption((o) => o.setName('args').setDescription('Listing id + buyer details').setRequired(true)),
 ].map((c) => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
