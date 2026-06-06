@@ -2,8 +2,11 @@
  * Reset Command — !reset
  *
  * Testing-only command. Wipes all bot data (purchases, shipping, battles,
- * queues, card listings, etc.), resets community goals, then runs
- * !sync to restore stock from Google Sheets → Stripe → WordPress.
+ * queues, card listings, etc.) and resets community goals.
+ *
+ * (The post-wipe `!sync` step was removed 2026-06-06 — Stripe is retired,
+ * and the card catalog syncs Sheet → WP directly via the vincentragosta.io
+ * make targets, not through the bot.)
  *
  * Akivili only. Requires confirmation before executing.
  */
@@ -11,7 +14,6 @@
 import { EmbedBuilder } from 'discord.js';
 import { db } from '../db.js';
 import config from '../config.js';
-import { handleSync } from './sync.js';
 import { initCommunityGoals } from '../community-goals.js';
 import * as queueSource from '../lib/queue-source.js';
 
@@ -46,7 +48,6 @@ async function handleReset(message) {
         .setTitle('⚠️ System Reset')
         .setDescription(
             'This will wipe **ALL data** — purchases, shipping, battles, queues, card listings, giveaways, discord links, and community goals.\n\n' +
-            'Stock will be restored via `!sync` (Sheets → Stripe → WordPress).\n\n' +
             '✅ React to confirm, or type `cancel` to abort.'
         )
         .setColor(0xe74c3c)] });
@@ -134,12 +135,6 @@ async function handleReset(message) {
         .setTitle('✅ Database Wiped')
         .setDescription(`${summary}\n${wpLine}\nCommunity goals reset to cycle 1, $0. Restock tracker updated.`)
         .setColor(0xceff00)] });
-
-    // Step 2: Sync products to restore stock
-    await message.channel.send({ embeds: [new EmbedBuilder()
-        .setDescription('🔄 **Restoring stock via !sync...**')
-        .setColor(0x3498db)] });
-    await handleSync(message, []);
 }
 
 export { handleReset };

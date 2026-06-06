@@ -4,9 +4,12 @@
  * Pattern:
  *   1. /reset → ephemeral embed listing EXACTLY what gets wiped, with
  *      [Confirm Reset] and [Cancel] buttons
- *   2. Confirm → wipes data, runs !sync, updates the same ephemeral embed
- *      with results
+ *   2. Confirm → wipes data, updates the same ephemeral embed with results
  *   3. Cancel → updates the embed to show the abort
+ *
+ * (The post-wipe `!sync` step was removed 2026-06-06 — Stripe is retired,
+ * and the card catalog syncs Sheet → WP directly via the vincentragosta.io
+ * make targets, not through the bot.)
  *
  * The detailed list lives here so the operator never has to remember
  * what reset actually touches. If the wiped scope changes, update both
@@ -16,10 +19,8 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 import config from '../../config.js';
 import { db } from '../../db.js';
-import { handleSync } from '../sync.js';
 import { initCommunityGoals } from '../../community-goals.js';
 import * as queueSource from '../../lib/queue-source.js';
-import { buildSyntheticMessage } from '../../lib/synthetic-message.js';
 
 // Tables wiped — must agree with the underlying handleReset() in commands/reset.js
 const TABLES_TO_CLEAR = [
@@ -54,7 +55,6 @@ const WIPE_GROUPS = [
     { domain: 'Purchases & identity', items: ['All purchases + counts', 'All Discord ↔ email links'] },
     { domain: 'Shipping & coupons', items: ['Shipping payment records (per-period coverage resets)', 'Active coupon claims'] },
     { domain: 'Community goals', items: ['Cycle resets to 1, lifetime/cycle revenue → $0'] },
-    { domain: 'After wipe', items: ['Runs `!sync` to repopulate stock from Sheets → Stripe → WP'] },
 ];
 
 const WIPE_LINES = WIPE_GROUPS
@@ -65,9 +65,9 @@ function buildConfirmEmbed() {
     return new EmbedBuilder()
         .setTitle('⚠️ Confirm Stream Reset')
         .setDescription(
-            `This wipes **all transactional state** so the next stream starts clean. Stock is restored automatically.\n\n` +
+            `This wipes **all transactional state** so the next stream starts clean.\n\n` +
             `**What gets wiped:**\n${WIPE_LINES}\n\n` +
-            `**What stays untouched:** Discord channels/roles/permissions, bot config, Stripe products themselves, WP catalog posts, ShippingEasy orders already filed, the #ops-log audit history.\n\n` +
+            `**What stays untouched:** Discord channels/roles/permissions, bot config, WP catalog posts, the #ops-log audit history.\n\n` +
             `Click **Confirm Reset** to proceed, **Cancel** to abort.`
         )
         .setColor(0xe74c3c)
@@ -134,7 +134,7 @@ export async function handleResetSlash(interaction) {
     await buttonInteraction.update({
         embeds: [new EmbedBuilder()
             .setTitle('🗑 Resetting…')
-            .setDescription('Wiping tables and restoring stock. This may take a minute.')
+            .setDescription('Wiping tables. This may take a moment.')
             .setColor(0xf39c12)],
         components: [buildButtons(true)],
     });
@@ -168,23 +168,11 @@ export async function handleResetSlash(interaction) {
 
     await interaction.editReply({
         embeds: [new EmbedBuilder()
-            .setTitle('✓ Reset complete — running !sync')
+            .setTitle('✓ Reset complete')
             .setDescription(`${clearedLine}${wpLine ? `\n${wpLine}` : ''}\nCommunity goals reset. Restock tracker refreshed.`)
             .setColor(0x2ecc71)],
         components: [buildButtons(true)],
     });
-
-    // Run sync to restore stock — handleSync wants a message-shaped object
-    const syntheticMessage = buildSyntheticMessage(buttonInteraction);
-    try {
-        await handleSync(syntheticMessage, []);
-    } catch (e) {
-        console.error('[reset] sync after wipe failed:', e.message);
-        await interaction.followUp({
-            content: `⚠ Reset wiped data successfully but \`!sync\` failed: ${e.message}. Run \`/op sync\` manually.`,
-            ephemeral: true,
-        });
-    }
 
     return cleared.length ? `wiped ${cleared.length} tables` : 'no changes';
 }
