@@ -3,19 +3,22 @@
  * price sync (Stripe-free).
  *
  * Background: card `price`/`stock` meta in WP used to be refreshed by
- * pull-cards.php reading Stripe (Sheet → Stripe → WP). Stripe is now parked,
- * so that chain is dead and WP prices freeze at whatever Stripe last had.
- * This script reads the maintained sheet directly and emits a JSON the WP-side
- * update-card-prices.php consumes, joined by Stripe product ID (col S) — still
- * a stable identifier present in both the sheet and WP `stripe_product_id`
- * meta even though Stripe itself is parked.
+ * pull-cards.php reading Stripe (Sheet → Stripe → WP). Stripe is retired
+ * (Whatnot pivot), so the sheet syncs straight into WP. Col S is the join
+ * key: either a numeric WP post ID (cards created Stripe-free; stamped by
+ * backfill-card-postids.mjs) or a legacy `prod_…` Stripe product ID (still
+ * present as `stripe_product_id` postmeta — an inert join handle). Rows with
+ * a blank col S are emitted too: the WP-side update-card-prices.php falls
+ * back to a card_name + card_number (+ set) join for those.
  *
  * Output (stdout): JSON array of
- *   { stripeProductId, name?, price?, stock?, doNotSell? }
+ *   { joinKey, name, number, set, price?, stock?, doNotSell? }
+ *   joinKey   — col S verbatim ('' when blank)
+ *   number    — col H (Card Number), set — col I (Set Name): fallback join
  *   price     — col D (Auction Price), normalized "$N.NN"
  *   stock     — col F, integer (0 included; sold-out rows zero out WP stock)
  *   doNotSell — true when the sheet row is red-filled (WP post → draft)
- * Rows with no Stripe product id, or no price/stock/red signal, are skipped.
+ * Rows with no name, or no price/stock/red signal, are skipped.
  *
  * Usage: node export-card-prices.mjs > /tmp/card-prices.json
  */
@@ -54,8 +57,8 @@ const out = [];
 for (const row of rowData) {
     const cells = row.values || [];
     const text = (i) => (cells[i]?.formattedValue || '').trim();
-    const stripeId = text(18);               // col S
-    if (!stripeId) continue;
+    const name = text(0);                    // col A
+    if (!name) continue;
 
     const isRed = cells.some((c) => {
         const ef = c?.effectiveFormat;
@@ -64,7 +67,12 @@ for (const row of rowData) {
     const priceNum = parseFloat(text(3).replace(/[^0-9.]/g, ''));   // col D
     const stockRaw = text(5).replace(/[^0-9-]/g, '');               // col F
 
-    const entry = { stripeProductId: stripeId, name: text(0) };
+    const entry = {
+        joinKey: text(18),                   // col S (WP post ID or legacy prod_…)
+        name,
+        number: text(7),                     // col H
+        set: text(8),                        // col I
+    };
     if (Number.isFinite(priceNum) && priceNum > 0) entry.price = '$' + priceNum.toFixed(2);
     if (stockRaw !== '' && Number.isFinite(parseInt(stockRaw, 10))) entry.stock = parseInt(stockRaw, 10);
     if (isRed) entry.doNotSell = true;

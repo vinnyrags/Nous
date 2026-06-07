@@ -81,7 +81,9 @@ const today = new Date().toISOString().slice(0, 10);
 
 // Singles sheet column map (0-indexed within A2:T):
 //   D(3) Auction Price · E(4) BIN Price · G(6) Auction Price Override
-//   S(18) Stripe Product ID — the join key (== WP `stripe_product_id`).
+//   S(18) join key — legacy Stripe product ID (== WP `stripe_product_id`
+//   meta) or numeric WP post ID (Stripe-free-created cards, stamped by
+//   backfill-card-postids.mjs).
 //
 // Pricing source of truth:
 //   • Auction starting bid = the WP/Stripe Auction Price (col D), UNLESS the
@@ -92,8 +94,8 @@ const today = new Date().toISOString().slice(0, 10);
 //     to a whole dollar).
 //   • Red-filled rows are "do not sell" and drop out of every CSV. (SOLD rows
 //     are dark grey and already vanish via stock = 0 in the WP export upstream.)
-// We join by Stripe product ID (sheet col S == WP `stripe_product_id` meta,
-// carried in inventory.json).
+// We join by the col S key: item.meta.stripe_product_id when present (legacy),
+// else String(item.id) — both carried in inventory.json.
 const SPREADSHEET_ID = '1erx1dUZ9YIwpg5xbXP_OFrE4i1dV97RoE7M0rsv_JkM';
 const CREDENTIALS_PATH = path.join(process.env.HOME, '.config/google/sheets-credentials.json');
 
@@ -419,9 +421,12 @@ function buildCardRow(item) {
     //                 the tiered formula over the auction price when the sheet
     //                 lookup misses (card not in sheet / blank stripe id /
     //                 sheet unavailable) so a BIN never ships at a sub-$5 bid.
-    const sid = (m.stripe_product_id || '').trim();
-    const override = sid ? OVERRIDE_BY_STRIPE.get(sid) : null;
-    const sheetAuction = sid ? AUCTION_BY_STRIPE.get(sid) : null;
+    // Join key: legacy Stripe product ID when the card has one, else the WP
+    // post ID (Stripe-free-created cards — col S holds the numeric WP ID,
+    // stamped by backfill-card-postids.mjs).
+    const sid = (m.stripe_product_id || '').trim() || String(item.id);
+    const override = OVERRIDE_BY_STRIPE.get(sid) ?? null;
+    const sheetAuction = AUCTION_BY_STRIPE.get(sid) ?? null;
     const auctionBase = override ?? sheetAuction ?? m.price;
     if (override) OVERRIDE_APPLIED++;
     let priceCell;
@@ -433,7 +438,7 @@ function buildCardRow(item) {
     } else if (override) {
         priceCell = String(Math.max(1, Math.ceil(override * 0.95)));
     } else {
-        const fromSheet = sid ? BIN_PRICE_BY_STRIPE.get(sid) : null;
+        const fromSheet = BIN_PRICE_BY_STRIPE.get(sid) ?? null;
         if (fromSheet) {
             priceCell = String(fromSheet);
         } else {
@@ -534,10 +539,11 @@ async function main() {
             skipped.push({ id: item.id, title: item.title, reason: 'excluded (--exclude-skus)' });
             continue;
         }
-        // Red "do not sell" rows in the Singles sheet (matched by Stripe
-        // product ID) drop out of every CSV — auction and BIN alike.
-        const itemStripeId = ((item.meta || {}).stripe_product_id || '').trim();
-        if (itemStripeId && DO_NOT_SELL_STRIPE.has(itemStripeId)) {
+        // Red "do not sell" rows in the Singles sheet (matched by the col S
+        // join key — legacy Stripe ID or WP post ID) drop out of every CSV —
+        // auction and BIN alike.
+        const itemStripeId = ((item.meta || {}).stripe_product_id || '').trim() || String(item.id);
+        if (DO_NOT_SELL_STRIPE.has(itemStripeId)) {
             skipped.push({ id: item.id, title: item.title, reason: 'do not sell (red row in sheet)' });
             continue;
         }
