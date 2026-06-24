@@ -52,13 +52,13 @@ const QUIET = args.includes('--quiet');
 const ROW_ARG = args.find((a) => a.startsWith('--row='));
 const ONLY_ROW = ROW_ARG ? parseInt(ROW_ARG.split('=')[1], 10) : null;
 
-// A-T schema (2026-05-29: TCGPlayer cols removed, Collectr added at C).
-// Variant is now K, Pokemon TCG API ID is now R.
+// A-R schema (2026-06-23: Price Charting [old B] + BIN Price [old E] removed).
+// Variant is now I, Pokemon TCG API ID is now P.
 const COL = {
     A: 0, B: 1, C: 2, D: 3, E: 4,
     F: 5, G: 6, H: 7, I: 8, J: 9,
     K: 10, L: 11, M: 12, N: 13, O: 14,
-    P: 15, Q: 16, R: 17, S: 18, T: 19,
+    P: 15, Q: 16, R: 17,
 };
 
 // Standard Full Art rarity tier for Pokemon V / VMAX / GX.
@@ -146,7 +146,7 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:T`,
+        range: `${SHEET_NAME}!A2:R`,
     });
     const rows = res.data.values || [];
 
@@ -158,8 +158,8 @@ async function main() {
         if (ONLY_ROW && sheetRow !== ONLY_ROW) continue;
 
         const name = (row[COL.A] || '').trim();
-        const variant = (row[COL.K] || '').trim();
-        const apiId = (row[COL.R] || '').trim();
+        const variant = (row[COL.I] || '').trim();
+        const apiId = (row[COL.P] || '').trim();
         if (!name || !variant || !apiId) continue;
 
         const tier = classifyVariant(variant);

@@ -32,11 +32,11 @@ const SHEET_NAME = 'Singles';
 
 const VERBOSE = process.argv.includes('--verbose');
 
-// A-T schema (2026-05-28): TCGPlayer Direct/Market removed, Collectr inserted
-// at C. Auction Price moved E→D; Stripe Product ID moved T→S.
+// A-R schema (2026-06-23: Price Charting [old B] + BIN Price [old E] removed).
+// Auction Price now at C (idx 2); WP Join Key now at Q (idx 16).
 const COL_A_INDEX = 0;   // name (for reporting)
-const COL_D_INDEX = 3;   // Auction Price (display string like "$5", "$1,000")
-const COL_S_INDEX = 18;  // stripe_product_id
+const COL_D_INDEX = 2;   // Auction Price (col C) — display string like "$5", "$1,000"
+const COL_S_INDEX = 16;  // WP Join Key (col Q)
 
 /**
  * Parse a display price string like "$25", "$1,000", or "$24.99" into
@@ -78,7 +78,7 @@ async function main() {
 
     const dataRes = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:T`,
+        range: `${SHEET_NAME}!A2:R`,
     });
     const rows = dataRes.data.values || [];
     console.log(`Singles rows: ${rows.length}`);

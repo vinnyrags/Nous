@@ -10,7 +10,7 @@
  *     prices: --auction uses it as the starting bid, and every BIN mode
  *     prices it at ceil(override × 0.95) — the override, 5% off, rounded up.
  *   - With no override, BIN modes price from the maintained BIN Price (col E:
- *     $5 floor, tiered markup, manual per-card overrides) and --auction uses
+ *     auction +5%, no floor) and --auction uses
  *     the maintained Auction Price (col D) read straight from the sheet (WP's
  *     price meta can lag the sheet between syncs; sheet is the source of truth).
  *   - Red-filled sheet rows are "do not sell" and are dropped from every CSV.
@@ -79,22 +79,24 @@ const ROOT = path.resolve(process.env.HOME, 'Projects/vinnyrags/websites');
 const INVENTORY = '/tmp/inventory.json';
 const today = new Date().toISOString().slice(0, 10);
 
-// Singles sheet column map (0-indexed within A2:T):
-//   D(3) Auction Price · E(4) BIN Price · G(6) Auction Price Override
-//   S(18) join key — legacy Stripe product ID (== WP `stripe_product_id`
+// Singles sheet column map (0-indexed within A2:R, after Price Charting +
+// BIN Price columns were removed 2026-06-23):
+//   C(2) Auction Price · E(4) Auction Price Override
+//   Q(16) join key — legacy Stripe product ID (== WP `stripe_product_id`
 //   meta) or numeric WP post ID (Stripe-free-created cards, stamped by
 //   backfill-card-postids.mjs).
 //
 // Pricing source of truth:
-//   • Auction starting bid = the WP/Stripe Auction Price (col D), UNLESS the
-//     row has an Auction Price Override (col G) — then col G wins.
-//   • Buy-it-Now = the maintained BIN Price (col E: $5 floor, tiered markup,
-//     ~26 manual per-card overrides), UNLESS the row has a col-G override, in
-//     which case BIN = ceil(override × 0.95) (the override, 5% off, rounded up
-//     to a whole dollar).
+//   • Auction starting bid = the Auction Price (col C), UNLESS the
+//     row has an Auction Price Override (col E) — then col E wins.
+//   • Buy-it-Now = computed from the Auction Price via tieredBinFromAuction
+//     (auction +5% under $5, then +$5 / +$10 tiers — no floor), UNLESS the row
+//     has a col-E override, in which case BIN = ceil(override × 0.95) (the
+//     override, 5% off, rounded up to a whole dollar). The BIN Price sheet
+//     column was removed 2026-06-23.
 //   • Red-filled rows are "do not sell" and drop out of every CSV. (SOLD rows
 //     are dark grey and already vanish via stock = 0 in the WP export upstream.)
-// We join by the col S key: item.meta.stripe_product_id when present (legacy),
+// We join by the col Q key: item.meta.stripe_product_id when present (legacy),
 // else String(item.id) — both carried in inventory.json.
 const SPREADSHEET_ID = '1erx1dUZ9YIwpg5xbXP_OFrE4i1dV97RoE7M0rsv_JkM';
 const CREDENTIALS_PATH = path.join(process.env.HOME, '.config/google/sheets-credentials.json');
@@ -129,7 +131,7 @@ async function loadSheetData() {
     // regardless of how it was set.
     const res = await sheets.spreadsheets.get({
         spreadsheetId: SPREADSHEET_ID,
-        ranges: ['Singles!A2:T'],
+        ranges: ['Singles!A2:R'],
         includeGridData: true,
         fields: 'sheets.data.rowData.values(formattedValue,effectiveFormat.backgroundColor,effectiveFormat.backgroundColorStyle)',
     });
@@ -140,7 +142,7 @@ async function loadSheetData() {
         const cells = row.values || [];
         const text = (i) => (cells[i]?.formattedValue || '').trim();
         const num = (i) => parseFloat(text(i).replace(/[^0-9.]/g, ''));
-        const stripeId = text(18);                  // col S (Stripe Product ID)
+        const stripeId = text(16);                  // col Q (WP Join Key)
         if (!text(0) && !stripeId) continue;        // skip fully-blank trailing rows
 
         // Red fill on any cell across the row = do-not-sell.
@@ -155,11 +157,11 @@ async function loadSheetData() {
         }
 
         if (!stripeId) continue;
-        const aucVal = num(3);                      // col D (Auction Price)
+        const aucVal = num(2);                      // col C (Auction Price)
         if (Number.isFinite(aucVal) && aucVal > 0) auction.set(stripeId, aucVal);
-        const binVal = num(4);                      // col E (BIN Price)
-        if (Number.isFinite(binVal) && binVal > 0) bin.set(stripeId, Math.round(binVal));
-        const ovrVal = num(6);                       // col G (Auction Price Override)
+        // BIN Price column removed 2026-06-23 — `bin` stays empty so every
+        // BIN-mode card falls back to tieredBinFromAuction (auction +5%).
+        const ovrVal = num(4);                       // col E (Auction Price Override)
         if (Number.isFinite(ovrVal) && ovrVal > 0) override.set(stripeId, ovrVal);
     }
     return { auction, bin, override, doNotSell, redCount, redNoStripe };
@@ -213,11 +215,12 @@ const OUT_CSV = path.join(ROOT, `tmp/whatnot-${outSuffix}-import-${today}.csv`);
 // sheet BIN lookup still gets a sane BIN. Fallback only — used when the
 // sheet lookup misses; named sealed products use their single price unchanged.
 //
-// Rule (updated 2026-05-26): anything under $5 floors to a flat $5 (no
-// +$5 added) — keeps cheap commons shippable without an outsized markup.
-// $5–$64 gets +$5, $65+ gets +$10.
+// Rule (updated 2026-06-23): the $5 floor is LIFTED. Sub-$5 auctions now
+// get a proportional BIN (auction + 5%, matching col E's CEILING(D*1.05)
+// formula) instead of flooring to a flat $5 — so cheap commons can list at
+// $2–$4. $5–$64 gets +$5, $65+ gets +$10.
 function tieredBinFromAuction(auctionDollars) {
-    if (auctionDollars < 5) return 5;
+    if (auctionDollars < 5) return Math.max(1, Math.ceil(auctionDollars * 1.05));
     if (auctionDollars < 65) return auctionDollars + 5;
     return auctionDollars + 10;
 }
@@ -420,7 +423,7 @@ function buildCardRow(item) {
     //     BIN modes → the sheet's maintained BIN Price (col E). Falls back to
     //                 the tiered formula over the auction price when the sheet
     //                 lookup misses (card not in sheet / blank stripe id /
-    //                 sheet unavailable) so a BIN never ships at a sub-$5 bid.
+    //                 sheet unavailable). No $5 floor (lifted 2026-06-23).
     // Join key: legacy Stripe product ID when the card has one, else the WP
     // post ID (Stripe-free-created cards — col S holds the numeric WP ID,
     // stamped by backfill-card-postids.mjs).
@@ -510,7 +513,7 @@ async function main() {
         BIN_PRICE_BY_STRIPE = sheet.bin;
         OVERRIDE_BY_STRIPE = sheet.override;
         DO_NOT_SELL_STRIPE = sheet.doNotSell;
-        console.log(`Singles sheet: ${sheet.auction.size} auction prices (col D), ${sheet.bin.size} BIN prices (col E), ${sheet.override.size} auction overrides (col G), ${sheet.doNotSell.size} red "do not sell" rows.`);
+        console.log(`Singles sheet: ${sheet.auction.size} auction prices (col C), ${sheet.override.size} auction overrides (col E), ${sheet.doNotSell.size} red "do not sell" rows.`);
         if (sheet.redNoStripe) {
             console.warn(`  ⚠ ${sheet.redNoStripe} red row(s) have no Stripe Product ID (col S) — can't match them to inventory; drop by WP id via --exclude-skus if they're live.`);
         }

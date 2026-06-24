@@ -316,9 +316,9 @@ function findStockMatch(rows, target) {
     .map((r, i) => ({
       index: i,
       name: (r[0] || '').trim(),
-      number: (r[7] || '').trim(),
-      set: (r[8] || '').trim(),
-      variant: (r[10] || '').trim(),
+      number: (r[5] || '').trim(),   // col F
+      set: (r[6] || '').trim(),       // col G
+      variant: (r[8] || '').trim(),   // col I
     }))
     .filter((r) => r.name.toLowerCase() === target.name.toLowerCase()
       && (target.number ? r.number === target.number : r.number === '')
@@ -328,7 +328,7 @@ function findStockMatch(rows, target) {
 
 function findRemovalMatch(rows, target) {
   return rows
-    .map((r, i) => ({ index: i, name: (r[0] || '').trim(), set: (r[8] || '').trim(), price: (r[3] || '').trim() }))
+    .map((r, i) => ({ index: i, name: (r[0] || '').trim(), set: (r[6] || '').trim(), price: (r[2] || '').trim() }))
     .filter((r) => r.name.toLowerCase() === target.name.toLowerCase()
       && r.set === target.setName
       && r.price === target.price);
@@ -363,7 +363,7 @@ async function main() {
 
   const dataRes = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${SHEET_NAME}!A2:T`,
+    range: `${SHEET_NAME}!A2:R`,
   });
   const rows = dataRes.data.values || [];
   console.log(`  Sheet rows: ${rows.length}\n`);
@@ -446,17 +446,16 @@ async function main() {
       newUnparsed++;
       continue;
     }
-    // Build a 20-cell row (A-T schema, 2026-05-29). Only fill the columns
-    // we have data for. BIN Price (col E) is left blank — populated by a
-    // separate flow.
-    const row = new Array(20).fill('');
+    // Build an 18-cell row (A-R schema, 2026-06-23). Only fill the columns
+    // we have data for.
+    const row = new Array(18).fill('');
     row[0] = parsed.name;          // A Card Name
-    row[3] = parsed.price;         // D Auction Price
-    row[5] = String(parsed.stock); // F Stock
-    row[7] = parsed.cardNumber;    // H Card Number
-    row[8] = parsed.setName;       // I Set Name
-    row[9] = parsed.setCode;       // J Set Code
-    row[10] = parsed.variant;      // K Variant
+    row[2] = parsed.price;         // C Auction Price
+    row[3] = String(parsed.stock); // D Stock
+    row[5] = parsed.cardNumber;    // F Card Number
+    row[6] = parsed.setName;       // G Set Name
+    row[7] = parsed.setCode;       // H Set Code
+    row[8] = parsed.variant;       // I Variant
     newRows.push(row);
     console.log(`  ✓ ${parsed.name.padEnd(28)} | num=${parsed.cardNumber.padEnd(8)} | set=${(parsed.setName || '').padEnd(14)} | variant=${(parsed.variant || '').padEnd(14)} | price=${parsed.price.padEnd(5)} | stock=${parsed.stock}`);
   }
@@ -470,19 +469,19 @@ async function main() {
   // ─── EXECUTE ─────────────────────────────────────────────────────────────
   console.log(`🚀 APPLYING changes...\n`);
 
-  // 1) Stock updates — batch update column F (Stock) by row number, plus
-  //    optional Auction Price (col D) when an "and change price to $X" clause
-  //    was parsed. (A-T schema, 2026-05-29: Stock=F, Auction Price=D.)
+  // 1) Stock updates — batch update column D (Stock) by row number, plus
+  //    optional Auction Price (col C) when an "and change price to $X" clause
+  //    was parsed. (A-R schema, 2026-06-23: Stock=D, Auction Price=C.)
   if (stockOps.length) {
     const data = [];
     for (const op of stockOps) {
       data.push({
-        range: `${SHEET_NAME}!F${op.rowNumber}`,
+        range: `${SHEET_NAME}!D${op.rowNumber}`,
         values: [[String(op.newStock)]],
       });
       if (op.newPrice) {
         data.push({
-          range: `${SHEET_NAME}!D${op.rowNumber}`,
+          range: `${SHEET_NAME}!C${op.rowNumber}`,
           values: [[op.newPrice]],
         });
       }
@@ -499,7 +498,7 @@ async function main() {
   if (newRows.length) {
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${SHEET_NAME}!A:T`,
+      range: `${SHEET_NAME}!A:R`,
       valueInputOption: 'RAW',
       insertDataOption: 'INSERT_ROWS',
       requestBody: { values: newRows },

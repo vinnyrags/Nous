@@ -46,17 +46,16 @@ const QUIET = args.includes('--quiet');
 const ROW_ARG = args.find((a) => a.startsWith('--row='));
 const ONLY_ROW = ROW_ARG ? parseInt(ROW_ARG.split('=')[1], 10) : null;
 
-// A-T schema (TCGPlayer Direct/Market removed, Collectr inserted at C on
-// 2026-05-28). Field semantics:
-// A name, B price-charting, C collectr, D auction-price, E bin-price,
-// F stock, G sale-price, H number, I set-name, J set-code, K variant,
-// L rarity, M game, N language, O image, P release-date, Q artist,
-// R api-id, S stripe-id, T notes.
+// A-R schema (2026-06-23: Price Charting [old B] + BIN Price [old E] removed).
+// Field semantics:
+// A name, B collectr, C auction-price, D stock, E ap-override, F number,
+// G set-name, H set-code, I variant, J rarity, K game, L language,
+// M image, N release-date, O release-date, P api-id, Q wp-join-key, R notes.
 const COL = {
     A: 0, B: 1, C: 2, D: 3, E: 4,
     F: 5, G: 6, H: 7, I: 8, J: 9,
     K: 10, L: 11, M: 12, N: 13, O: 14,
-    P: 15, Q: 16, R: 17, S: 18, T: 19,
+    P: 15, Q: 16, R: 17,
 };
 
 // Recognized variant labels. Anything outside this set gets a warning so
@@ -197,7 +196,7 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:T`,
+        range: `${SHEET_NAME}!A2:R`,
     });
     const rows = res.data.values || [];
 
@@ -205,12 +204,12 @@ async function main() {
     let warnCount = 0;
     const setCache = new Map(); // setId → cards[]
 
-    // Pre-fetch every distinct set referenced by column R (Pokemon TCG
+    // Pre-fetch every distinct set referenced by column P (Pokemon TCG
     // API ID). Way fewer API hits than fetching each card individually —
     // 30-50 calls instead of 339 — and avoids the 429 rate-limit spam.
     const allSetIds = new Set();
     for (const row of rows) {
-        const apiId = (row[COL.R] || '').trim();
+        const apiId = (row[COL.P] || '').trim();
         const setId = setIdFromApiId(apiId);
         if (setId) allSetIds.add(setId);
     }
@@ -244,15 +243,14 @@ async function main() {
         const row = rows[i];
 
         const name = (row[COL.A] || '').trim();
-        const price = (row[COL.D] || '').trim();          // Auction Price
-        // row[COL.E] = BIN Price — informational, no lint required here.
-        const stock = (row[COL.F] || '').trim();
-        const number = (row[COL.H] || '').trim();
-        const setName = (row[COL.I] || '').trim();
-        const setCode = (row[COL.J] || '').trim();
-        const variant = (row[COL.K] || '').trim();
-        const releaseDate = (row[COL.P] || '').trim();
-        const apiId = (row[COL.R] || '').trim();
+        const price = (row[COL.C] || '').trim();          // Auction Price
+        const stock = (row[COL.D] || '').trim();
+        const number = (row[COL.F] || '').trim();
+        const setName = (row[COL.G] || '').trim();
+        const setCode = (row[COL.H] || '').trim();
+        const variant = (row[COL.I] || '').trim();
+        const releaseDate = (row[COL.N] || '').trim();
+        const apiId = (row[COL.P] || '').trim();
 
         const issues = [];
 

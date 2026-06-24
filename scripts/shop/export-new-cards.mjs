@@ -30,33 +30,33 @@ const auth = new google.auth.GoogleAuth({
 const sheets = google.sheets({ version: 'v4', auth });
 const rows = (await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'Singles!A2:T',
+    range: 'Singles!A2:R',
 })).data.values || [];
 
 const out = [];
 for (const r of rows) {
     const name = (r[0] || '').trim();
-    const stripeId = (r[18] || '').trim();   // col S
-    const setName = (r[8] || '').trim();     // col I
-    const image = (r[14] || '').trim();      // col O
-    // New = no Stripe id yet; enriched = has set + image. Skip otherwise.
+    const stripeId = (r[16] || '').trim();   // col Q (WP Join Key)
+    const setName = (r[6] || '').trim();     // col G (Set Name)
+    const image = (r[12] || '').trim();      // col M (Image URL)
+    // New = no join key yet; enriched = has set + image. Skip otherwise.
     if (!name || stripeId || !setName || !image) continue;
 
-    const priceNum = parseFloat(String(r[3] || '').replace(/[^0-9.]/g, ''));   // col D
-    const stockNum = parseInt(String(r[5] || '').replace(/[^0-9-]/g, ''), 10); // col F
+    const priceNum = parseFloat(String(r[2] || '').replace(/[^0-9.]/g, ''));   // col C (Auction Price)
+    const stockNum = parseInt(String(r[3] || '').replace(/[^0-9-]/g, ''), 10); // col D (Stock)
 
     out.push({
         name,
-        number: (r[7] || '').trim(),            // H
-        set_name: setName,                       // I
-        set_code: (r[9] || '').trim(),           // J
-        variant: (r[10] || '').trim(),           // K
-        rarity: (r[11] || '').trim(),            // L
-        game: (r[12] || '').trim() || 'pokemon', // M
-        language: (r[13] || '').trim(),          // N
-        image,                                   // O
-        release_date: (r[15] || '').trim(),      // P
-        artist: (r[16] || '').trim(),            // Q
+        number: (r[5] || '').trim(),            // F Card Number
+        set_name: setName,                       // G Set Name
+        set_code: (r[7] || '').trim(),           // H Set Code
+        variant: (r[8] || '').trim(),            // I Variant
+        rarity: (r[9] || '').trim(),             // J Rarity
+        game: (r[10] || '').trim() || 'pokemon', // K Game
+        language: (r[11] || '').trim(),          // L Language
+        image,                                   // M Image URL
+        release_date: (r[13] || '').trim(),      // N Release Date
+        artist: (r[14] || '').trim(),            // O (Artist / Release Date 2)
         price: Number.isFinite(priceNum) && priceNum > 0 ? '$' + priceNum.toFixed(2) : '',
         stock: Number.isFinite(stockNum) ? stockNum : 0,
     });

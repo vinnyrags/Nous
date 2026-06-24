@@ -29,25 +29,25 @@ async function main() {
 
     const headerRes = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A1:T1`,
+        range: `${SHEET_NAME}!A1:R1`,
     });
     const headers = headerRes.data.values?.[0] || [];
-    console.log('=== Headers (A-T) ===');
+    console.log('=== Headers (A-R) ===');
     headers.forEach((h, i) => console.log(`  ${String.fromCharCode(65 + i)}: ${h}`));
 
     const dataRes = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:T`,
+        range: `${SHEET_NAME}!A2:R`,
     });
     const rows = dataRes.data.values || [];
     console.log(`\n=== Total rows: ${rows.length} ===`);
 
-    // A-T schema (2026-05-28): A name, D auction price, E BIN price, F stock,
-    // H number, I set name, J set code, K variant.
+    // A-R schema (2026-06-23): A name, B collectr, C auction price, D stock,
+    // F number, G set name, H set code, I variant.
     if (targets.length === 0) {
-        console.log('\n=== First 3 rows (A,D,E,F,H,I for context) ===');
+        console.log('\n=== First 3 rows (A,C,D,F,G for context) ===');
         rows.slice(0, 3).forEach((r, i) => {
-            console.log(`  Row ${i + 2}: A="${r[0]}" D="${r[3]}" E="${r[4]}" F="${r[5]}" H="${r[7]}" I="${r[8]}"`);
+            console.log(`  Row ${i + 2}: A="${r[0]}" C="${r[2]}" D="${r[3]}" F="${r[5]}" G="${r[6]}"`);
         });
         return;
     }
@@ -58,18 +58,17 @@ async function main() {
             .map((r, i) => ({
                 row: i + 2,
                 a: r[0] || '',
+                c: r[2] || '',
                 d: r[3] || '',
-                e: r[4] || '',
                 f: r[5] || '',
+                g: r[6] || '',
                 h: r[7] || '',
                 i: r[8] || '',
-                j: r[9] || '',
-                k: r[10] || '',
             }))
             .filter((r) => r.a.toLowerCase().includes(target.toLowerCase()));
         console.log(`\n  "${target}" → ${hits.length} hit(s)`);
         hits.forEach((hit) =>
-            console.log(`    Row ${hit.row}: A="${hit.a}" | num="${hit.h}" | set="${hit.i}" | code="${hit.j}" | variant="${hit.k}" | auction="${hit.d}" | bin="${hit.e}" | stock="${hit.f}"`),
+            console.log(`    Row ${hit.row}: A="${hit.a}" | num="${hit.f}" | set="${hit.g}" | code="${hit.h}" | variant="${hit.i}" | auction="${hit.c}" | stock="${hit.d}"`),
         );
     }
 }

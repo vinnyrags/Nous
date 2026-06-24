@@ -50,21 +50,28 @@ const VARIANTS_ONLY = process.argv.includes('--variants-only');
 // letter-prefix matching rule in scoreCandidate.
 const PREFIX_ONLY = process.argv.includes('--prefix-only');
 
-// Column indices for the A-T schema (2026-05-29: TCGPlayer cols removed,
-// Collectr added at C; columns from old D onward shifted left by one).
+// Column indices for the A-R schema (2026-06-23: Price Charting [old B] +
+// BIN Price [old E] removed; all cols from old F onward shifted left by two,
+// Collectr/Auction shifted left by one).
 const COL = {
     A: 0,  // Card Name
-    H: 7,  // Card Number     (was I)
-    I: 8,  // Set Name        (was J)
-    J: 9,  // Set Code        (was K)
-    K: 10, // Variant         (was L)
-    L: 11, // Rarity          (was M)
-    N: 13, // Language        (was O)
-    O: 14, // Image URL       (was P)
-    P: 15, // Release Date    (was Q)
-    Q: 16, // Artist          (was R)
-    R: 17, // Pokemon TCG API ID (was S)
-    T: 19, // Notes           (was U)
+    B: 1,  // Collectr
+    C: 2,  // Auction Price
+    D: 3,  // Stock
+    E: 4,  // AP Override
+    F: 5,  // Card Number
+    G: 6,  // Set Name
+    H: 7,  // Set Code
+    I: 8,  // Variant
+    J: 9,  // Rarity
+    K: 10, // Game
+    L: 11, // Language
+    M: 12, // Image URL
+    N: 13, // Release Date
+    O: 14, // Artist / Release Date
+    P: 15, // Pokemon TCG API ID
+    Q: 16, // WP Join Key
+    R: 17, // Notes
 };
 
 const RARITY_MAP = {
@@ -444,7 +451,7 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:T`,
+        range: `${SHEET_NAME}!A2:R`,
     });
 
     const rows = res.data.values || [];
@@ -472,30 +479,30 @@ async function main() {
         if (ONLY_ROW && sheetRow !== ONLY_ROW) continue;
 
         const name = (row[COL.A] || '').trim();
-        const number = (row[COL.H] || '').trim();
-        const rawSetHint = (row[COL.I] || '').trim();
+        const number = (row[COL.F] || '').trim();
+        const rawSetHint = (row[COL.G] || '').trim();
         const setHint = cleanSetHint(rawSetHint);
-        const setCode = (row[COL.J] || '').trim();
-        const variantCol = (row[COL.K] || '').trim();
+        const setCode = (row[COL.H] || '').trim();
+        const variantCol = (row[COL.I] || '').trim();
 
         if (!name) continue;
         // Japanese cards are enriched via TCGplayer (enrich-singles-japanese.mjs)
         // — the Pokemon TCG API is English-only and would mismatch them to the
-        // wrong Western card. Never touch a row flagged Japanese in column N (Language).
-        if ((row[COL.N] || '').trim().toLowerCase().startsWith('japan')) continue;
-        if (VARIANTS_ONLY && !(row[COL.K] || '').trim()) continue;
+        // wrong Western card. Never touch a row flagged Japanese in column L (Language).
+        if ((row[COL.L] || '').trim().toLowerCase().startsWith('japan')) continue;
+        if (VARIANTS_ONLY && !(row[COL.I] || '').trim()) continue;
         if (PREFIX_ONLY) {
-            const h = (row[COL.H] || '').trim();
+            const h = (row[COL.F] || '').trim();
             // Match "SWSH076", "XY69", "SM213" — letters followed by digits.
             if (!/^[a-z]+\d/i.test(h)) continue;
         }
 
         // Skip fully-enriched rows unless --force
-        const rarity = (row[COL.L] || '').trim();
-        const image = (row[COL.O] || '').trim();
-        const year = (row[COL.P] || '').trim();
-        const artist = (row[COL.Q] || '').trim();
-        const apiId = (row[COL.R] || '').trim();
+        const rarity = (row[COL.J] || '').trim();
+        const image = (row[COL.M] || '').trim();
+        const year = (row[COL.N] || '').trim();
+        const artist = (row[COL.O] || '').trim();
+        const apiId = (row[COL.P] || '').trim();
         if (!FORCE && rarity && image && year && artist && apiId) {
             logs.alreadyComplete++;
             continue;
@@ -588,18 +595,18 @@ async function main() {
         const apiArtist = match.artist || '';
         const apiCardId = match.id || '';
 
-        // In FORCE mode we always overwrite the enriched fields (rarity L,
-        // image O, release P, artist Q, api-id R) so the new matcher's picks
-        // replace the old ones. Set Name (I) and Set Code (J) remain
+        // In FORCE mode we always overwrite the enriched fields (rarity J,
+        // image M, release N, artist O, api-id P) so the new matcher's picks
+        // replace the old ones. Set Name (G) and Set Code (H) remain
         // user-owned — only filled when blank.
         const writes = {};
-        if (!setHint && apiSetName) writes.I = apiSetName;             // Set Name
-        if (!(row[COL.J] || '').trim() && apiSetId) writes.J = apiSetId; // Set Code
-        if ((FORCE || !rarity) && apiRarity) writes.L = apiRarity;     // Rarity
-        if ((FORCE || !image) && apiImage) writes.O = apiImage;        // Image URL
-        if ((FORCE || !year) && apiReleaseDate) writes.P = apiReleaseDate; // Release Date
-        if ((FORCE || !artist) && apiArtist) writes.Q = apiArtist;     // Artist
-        if ((FORCE || !apiId) && apiCardId) writes.R = apiCardId;      // Pokemon TCG API ID
+        if (!setHint && apiSetName) writes.G = apiSetName;             // Set Name
+        if (!(row[COL.H] || '').trim() && apiSetId) writes.H = apiSetId; // Set Code
+        if ((FORCE || !rarity) && apiRarity) writes.J = apiRarity;     // Rarity
+        if ((FORCE || !image) && apiImage) writes.M = apiImage;        // Image URL
+        if ((FORCE || !year) && apiReleaseDate) writes.N = apiReleaseDate; // Release Date
+        if ((FORCE || !artist) && apiArtist) writes.O = apiArtist;     // Artist
+        if ((FORCE || !apiId) && apiCardId) writes.P = apiCardId;      // Pokemon TCG API ID
 
         for (const [col, value] of Object.entries(writes)) {
             updates.push({

@@ -85,14 +85,13 @@ if (CLEAN && !DRY_RUN && STRIPE_MODE === 'live' && !ALLOW_LIVE_CLEAN) {
     process.exit(2);
 }
 
-// Column indices for the A-T schema (2026-05-29: dropped the two TCGPlayer
-// columns, added "Collectr" at C; Auction shifted E→D, everything after
-// shifts left one, Stripe Product ID T→S, Notes U→T).
+// Column indices for the A-R schema (2026-06-23: Price Charting [old B] +
+// BIN Price [old E] removed; Collectr now B, Auction now C, WP Join Key now Q).
 const COL = {
     A: 0, B: 1, C: 2, D: 3, E: 4,
     F: 5, G: 6, H: 7, I: 8, J: 9,
     K: 10, L: 11, M: 12, N: 13, O: 14,
-    P: 15, Q: 16, R: 17, S: 18, T: 19,
+    P: 15, Q: 16, R: 17,
 };
 
 /**
@@ -184,7 +183,7 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:T`,
+        range: `${SHEET_NAME}!A2:R`,
     });
 
     const rows = res.data.values || [];
@@ -207,25 +206,23 @@ async function main() {
         const sheetRow = i + 2;
 
         const name = (row[COL.A] || '').trim();
-        const priceStr = (row[COL.D] || '').trim();          // Auction Price → Stripe default_price
-        // row[COL.E] = BIN Price — read by a separate pipeline, ignored here.
-        const stock = (row[COL.F] || '1').trim();
-        // col G is the Whatnot Auction Price Override (read by
+        const priceStr = (row[COL.C] || '').trim();          // Auction Price → Stripe default_price
+        const stock = (row[COL.D] || '1').trim();
+        // col E is the Whatnot Auction Price Override (read by
         // build-whatnot-full-import.mjs) — NOT a Stripe sale price. Not read here.
-        const cardNumber = (row[COL.H] || '').trim();
-        const setName = (row[COL.I] || '').trim();
-        const setCode = (row[COL.J] || '').trim();
-        const variant = (row[COL.K] || '').trim();
-        const rarity = (row[COL.L] || '').trim();
-        const game = (row[COL.M] || 'pokemon').trim();
-        const language = (row[COL.N] || 'English').trim();
-        const imageUrl = (row[COL.O] || '').trim();
-        const releaseDate = (row[COL.P] || '').trim();
-        const artist = (row[COL.Q] || '').trim();
-        const tcgApiId = (row[COL.R] || '').trim();
-        const existingProductId = (row[COL.S] || '').trim();
-        const priceCharting = (row[COL.B] || '').trim();
-        const collectr = (row[COL.C] || '').trim();
+        const cardNumber = (row[COL.F] || '').trim();
+        const setName = (row[COL.G] || '').trim();
+        const setCode = (row[COL.H] || '').trim();
+        const variant = (row[COL.I] || '').trim();
+        const rarity = (row[COL.J] || '').trim();
+        const game = (row[COL.K] || 'pokemon').trim();
+        const language = (row[COL.L] || 'English').trim();
+        const imageUrl = (row[COL.M] || '').trim();
+        const releaseDate = (row[COL.N] || '').trim();
+        const artist = (row[COL.O] || '').trim();
+        const tcgApiId = (row[COL.P] || '').trim();
+        const existingProductId = (row[COL.Q] || '').trim();
+        const collectr = (row[COL.B] || '').trim();          // Price Charting (old col B) removed 2026-06-23
 
         if (!name) {
             console.log(`  Skipping row ${sheetRow} — missing name`);
@@ -264,7 +261,6 @@ async function main() {
         if (artist) metadata.artist = artist;
         if (tcgApiId) metadata.tcg_api_id = tcgApiId;
         // Reference prices — kept on Stripe for operator context, not used at checkout.
-        if (priceCharting) metadata.ref_price_charting = priceCharting;
         if (collectr) metadata.ref_collectr = collectr;
 
         // Find existing product — prefer the stored ID, fall back to name+type search

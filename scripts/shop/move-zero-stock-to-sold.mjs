@@ -38,17 +38,17 @@ const sheets = google.sheets({ version: 'v4', auth });
 
 // One snapshot drives everything below.
 const singles = (await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID, range: 'Singles!A2:T',
+    spreadsheetId: SPREADSHEET_ID, range: 'Singles!A2:R',
 })).data.values || [];
 
 const movers = []; // { dataIdx, values }
 singles.forEach((v, i) => {
-    if (String(v[5] ?? '').trim() === '0') movers.push({ dataIdx: i, values: v });
+    if (String(v[3] ?? '').trim() === '0') movers.push({ dataIdx: i, values: v });
 });
 
 console.log(`Singles rows: ${singles.length} · Stock=0 rows to move: ${movers.length}`);
 for (const m of movers.slice(0, 10)) {
-    console.log(`  row ${m.dataIdx + 2}: "${m.values[0]}" #${m.values[7] || '?'} — ${m.values[8] || ''}`);
+    console.log(`  row ${m.dataIdx + 2}: "${m.values[0]}" #${m.values[5] || '?'} — ${m.values[6] || ''}`);
 }
 if (movers.length > 10) console.log(`  ... +${movers.length - 10} more`);
 
@@ -58,8 +58,12 @@ if (!APPLY) {
     process.exit(0);
 }
 
-// Append A–E to Sold at an explicitly computed row (values.append's table
+// Append to Sold at an explicitly computed row (values.append's table
 // detection can be thrown off by the summary cells in Sold!J1:K1).
+// The Sold tab keeps its A–E layout (A name, B Price Charting, C Collectr,
+// D Auction, E BIN). The Singles schema no longer has Price Charting/BIN, so
+// map the surviving Singles cols into the right Sold slots and leave B/E blank:
+//   Singles A(name)→Sold A · Singles B(collectr)→Sold C · Singles C(auction)→Sold D
 const soldColA = (await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID, range: 'Sold!A:A',
 })).data.values || [];
@@ -68,7 +72,7 @@ await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `Sold!A${soldStart}:E${soldStart + movers.length - 1}`,
     valueInputOption: 'RAW',
-    requestBody: { values: movers.map((m) => m.values.slice(0, 5).map((c) => c ?? '')) },
+    requestBody: { values: movers.map((m) => [m.values[0] ?? '', '', m.values[1] ?? '', m.values[2] ?? '', '']) },
 });
 console.log(`Appended ${movers.length} rows to Sold at A${soldStart}.`);
 
@@ -87,9 +91,9 @@ console.log(`Deleted ${requests.length} rows from Singles.`);
 
 // Post-state verification.
 const after = (await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID, range: 'Singles!A2:T',
+    spreadsheetId: SPREADSHEET_ID, range: 'Singles!A2:R',
 })).data.values || [];
-const leftover = after.filter((v) => String(v[5] ?? '').trim() === '0').length;
+const leftover = after.filter((v) => String(v[3] ?? '').trim() === '0').length;
 const soldAfter = ((await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID, range: 'Sold!A:A',
 })).data.values || []).length;

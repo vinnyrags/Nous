@@ -59,11 +59,26 @@ const ONLY_ROW = arg('row', null);
 // attaching a wrong image when the card name/number/set don't agree.
 const MIN_SCORE = arg('min-score', 0);
 
-// A-T schema (2026-05-29: TCGPlayer cols removed, Collectr added at C).
+// A-R schema (2026-06-23: Price Charting [old B] + BIN Price [old E] removed).
 const COL = {
-    A: 0, B: 1, C: 2, D: 3, E: 4, F: 5, G: 6,
-    H: 7, I: 8, J: 9, K: 10, L: 11, M: 12, N: 13,
-    O: 14, P: 15, Q: 16, R: 17, S: 18, T: 19,
+    A: 0,  // Card Name
+    B: 1,  // Collectr
+    C: 2,  // Auction Price
+    D: 3,  // Stock
+    E: 4,  // AP Override
+    F: 5,  // Card Number
+    G: 6,  // Set Name
+    H: 7,  // Set Code
+    I: 8,  // Variant
+    J: 9,  // Rarity
+    K: 10, // Game
+    L: 11, // Language
+    M: 12, // Image URL
+    N: 13, // Release Date
+    O: 14, // Release Date
+    P: 15, // Pokemon TCG API ID
+    Q: 16, // WP Join Key
+    R: 17, // Notes
 };
 
 // TCGplayer JP rarity strings → our internal vocabulary (same target set
@@ -253,7 +268,7 @@ async function main() {
 
     const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:T`,
+        range: `${SHEET_NAME}!A2:R`,
     });
     const rows = res.data.values || [];
 
@@ -270,9 +285,9 @@ async function main() {
 
         const row = rows[i];
         const name = (row[COL.A] || '').trim();
-        const number = (row[COL.H] || '').trim();
-        const setName = (row[COL.I] || '').trim();
-        const haveImage = (row[COL.O] || '').trim();
+        const number = (row[COL.F] || '').trim();
+        const setName = (row[COL.G] || '').trim();
+        const haveImage = (row[COL.M] || '').trim();
         if (!name) continue;
         if (haveImage && !FORCE) {
             logs.skipped++;
@@ -311,12 +326,12 @@ async function main() {
         await sleep(120);
 
         const writes = {};
-        if ((FORCE || !(row[COL.O] || '').trim())) writes.O = TCG_IMAGE(pid);      // Image URL
-        if (!(row[COL.J] || '').trim() && setCode) writes.J = setCode;             // Set Code
-        if ((FORCE || !(row[COL.L] || '').trim()) && rarity) writes.L = rarity;    // Rarity
-        if (!(row[COL.N] || '').trim()) writes.N = 'Japanese';                     // Language
-        if ((FORCE || !(row[COL.P] || '').trim()) && release) writes.P = release;  // Release Date
-        if (!(row[COL.R] || '').trim()) writes.R = `tcgp-${pid}`;                  // Pokemon TCG API ID / provenance
+        if ((FORCE || !(row[COL.M] || '').trim())) writes.M = TCG_IMAGE(pid);      // Image URL
+        if (!(row[COL.H] || '').trim() && setCode) writes.H = setCode;             // Set Code
+        if ((FORCE || !(row[COL.J] || '').trim()) && rarity) writes.J = rarity;    // Rarity
+        if (!(row[COL.L] || '').trim()) writes.L = 'Japanese';                     // Language
+        if ((FORCE || !(row[COL.N] || '').trim()) && release) writes.N = release;  // Release Date
+        if (!(row[COL.P] || '').trim()) writes.P = `tcgp-${pid}`;                  // Pokemon TCG API ID / provenance
 
         for (const [c, v] of Object.entries(writes)) {
             updates.push({ range: `${SHEET_NAME}!${c}${sheetRow}`, values: [[v]] });

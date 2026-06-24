@@ -62,25 +62,25 @@ const sheets = google.sheets({ version: 'v4', auth });
 
 // One snapshot drives everything below.
 const rows = (await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID, range: 'Singles!A2:T',
+    spreadsheetId: SPREADSHEET_ID, range: 'Singles!A2:R',
 })).data.values || [];
 
 const writes = [];
 let ambiguous = 0, unmatchedCount = 0;
 rows.forEach((v, i) => {
     const name = String(v[0] || '').trim();
-    const joinKey = String(v[18] || '').trim();
-    if (!name || joinKey) return;            // only blank-col-S rows
+    const joinKey = String(v[16] || '').trim();  // col Q (WP Join Key)
+    if (!name || joinKey) return;            // only blank-join-key rows
 
-    const number = String(v[7] || '').trim();
-    const set = String(v[8] || '').trim();
+    const number = String(v[5] || '').trim();    // col F (Card Number)
+    const set = String(v[6] || '').trim();        // col G (Set Name)
     let hits = byNameNumber.get(`${norm(name)}|${norm(number)}`) || [];
     if (hits.length > 1 && set) {
         hits = hits.filter((h) => setMatches(h.set, set));
     }
     if (hits.length === 1) {
         console.log(`  row ${i + 2}: ${name} #${number} (${set}) → WP ${hits[0].id}`);
-        writes.push({ range: `Singles!S${i + 2}`, values: [[String(hits[0].id)]] });
+        writes.push({ range: `Singles!Q${i + 2}`, values: [[String(hits[0].id)]] });
     } else if (hits.length > 1) {
         ambiguous++;
         console.warn(`  ⚠ row ${i + 2}: ${name} #${number} matches ${hits.length} WP cards — left blank`);

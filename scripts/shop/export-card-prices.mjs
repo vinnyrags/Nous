@@ -47,7 +47,7 @@ const auth = new google.auth.GoogleAuth({
 const sheets = google.sheets({ version: 'v4', auth });
 const res = await sheets.spreadsheets.get({
     spreadsheetId: SPREADSHEET_ID,
-    ranges: ['Singles!A2:T'],
+    ranges: ['Singles!A2:R'],
     includeGridData: true,
     fields: 'sheets.data.rowData.values(formattedValue,effectiveFormat.backgroundColor,effectiveFormat.backgroundColorStyle)',
 });
@@ -64,14 +64,14 @@ for (const row of rowData) {
         const ef = c?.effectiveFormat;
         return isRedFill(ef?.backgroundColorStyle?.rgbColor || ef?.backgroundColor);
     });
-    const priceNum = parseFloat(text(3).replace(/[^0-9.]/g, ''));   // col D
-    const stockRaw = text(5).replace(/[^0-9-]/g, '');               // col F
+    const priceNum = parseFloat(text(2).replace(/[^0-9.]/g, ''));   // col C (Auction Price)
+    const stockRaw = text(3).replace(/[^0-9-]/g, '');               // col D (Stock)
 
     const entry = {
-        joinKey: text(18),                   // col S (WP post ID or legacy prod_…)
+        joinKey: text(16),                   // col Q (WP post ID or legacy prod_…)
         name,
-        number: text(7),                     // col H
-        set: text(8),                        // col I
+        number: text(5),                     // col F (Card Number)
+        set: text(6),                        // col G (Set Name)
     };
     if (Number.isFinite(priceNum) && priceNum > 0) entry.price = '$' + priceNum.toFixed(2);
     if (stockRaw !== '' && Number.isFinite(parseInt(stockRaw, 10))) entry.stock = parseInt(stockRaw, 10);
