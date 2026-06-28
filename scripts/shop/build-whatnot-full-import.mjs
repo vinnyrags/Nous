@@ -75,7 +75,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { google } from 'googleapis';
 
-const ROOT = path.resolve(process.env.HOME, 'Projects/vinnyrags/websites');
+const ROOT = path.resolve(process.env.HOME, 'Projects/vinnyrags/personal/vincentragosta.io');
 const INVENTORY = '/tmp/inventory.json';
 const today = new Date().toISOString().slice(0, 10);
 

@@ -391,9 +391,9 @@ async function main() {
       const m = matches[0];
       const sheetRow = m.index + 2;
       // Resolve delta against the current sheet value. Strip non-digit
-      // chars so any stray formatting in col F can't poison the math.
-      // (Stock col is F in the 2026-05-29 A-T schema.)
-      const currentRaw = (rows[m.index][5] || '0').toString();
+      // chars so any stray formatting in the cell can't poison the math.
+      // (Stock is col D — index 3 — in the current A-R schema.)
+      const currentRaw = (rows[m.index][3] || '0').toString();
       const currentStock = parseInt(currentRaw.replace(/[^0-9-]/g, ''), 10) || 0;
       const newStock = target.stockOp.type === 'delta'
         ? currentStock + target.stockOp.value
