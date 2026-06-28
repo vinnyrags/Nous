@@ -14,7 +14,15 @@ import { purchases } from '../db.js';
 import { propagateRefund } from '../lib/refund-propagator.js';
 import { retrieveSessionWithPaymentIntent, createRefund } from '@itzenzottv/stripe-bridge';
 
-const stripe = new Stripe(config.STRIPE_SECRET_KEY);
+// Lazily construct the Stripe client. Importing this module must stay
+// side-effect-free: when STRIPE_ENABLED is off (Whatnot pivot) the key is
+// null, and constructing Stripe at module load would throw on import even
+// though index.js already gates /refund behind STRIPE_GATED_COMMANDS.
+let _stripe = null;
+function getStripe() {
+    if (!_stripe) _stripe = new Stripe(config.STRIPE_SECRET_KEY);
+    return _stripe;
+}
 
 async function handleRefund(message, args) {
     // Owner-only
@@ -112,6 +120,7 @@ function parseAmountAndReason(refundArgs) {
  * skip-and-continue against multiple recent purchases.
  */
 async function attemptRefund(message, sessionId, purchase, amountCents, reason) {
+    const stripe = getStripe();
     const session = await retrieveSessionWithPaymentIntent(stripe, sessionId);
 
     const paymentIntent = session.payment_intent;

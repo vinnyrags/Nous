@@ -1112,7 +1112,9 @@ app.post('/test/run', async (req, res) => {
  */
 function startServer() {
     const host = config.BOT_BIND_HOST;
-    app.listen(config.PORT, host, () => {
+    // Return the http.Server so the caller (index.js) can close() it during
+    // graceful shutdown and stop accepting new connections before exit.
+    return app.listen(config.PORT, host, () => {
         console.log(`Webhook server listening on ${host}:${config.PORT}`);
     });
 }

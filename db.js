@@ -235,6 +235,19 @@ db.exec(`
     );
     CREATE INDEX IF NOT EXISTS idx_activity_events_created_at
         ON activity_events(created_at DESC);
+
+    -- Hot-path indexes (verified with EXPLAIN QUERY PLAN — these queries
+    -- full-scanned purchases/discord_links before they existed):
+    --   purchases by buyer:  WHERE discord_user_id = ? ORDER BY id DESC
+    CREATE INDEX IF NOT EXISTS idx_purchases_discord_user_id
+        ON purchases(discord_user_id);
+    --   unshipped sweep:     WHERE shipped_at IS NULL AND discord_user_id (IS|IS NOT) NULL
+    --   partial index keeps it tiny — only the open (unshipped) rows are indexed
+    CREATE INDEX IF NOT EXISTS idx_purchases_unshipped
+        ON purchases(discord_user_id) WHERE shipped_at IS NULL;
+    --   reverse account lookup: WHERE customer_email = ?
+    CREATE INDEX IF NOT EXISTS idx_discord_links_customer_email
+        ON discord_links(customer_email);
 `);
 
 // =========================================================================
@@ -1207,8 +1220,26 @@ const tosAcceptanceStmts = {
     `),
 };
 
+/**
+ * Close the database cleanly. Called from the graceful-shutdown path in
+ * index.js so an in-flight WAL is checkpointed back into the main db file
+ * before the process exits — prevents a truncated WAL on systemd SIGTERM.
+ * Idempotent: better-sqlite3's close() is a no-op once already closed.
+ */
+function closeDb() {
+    try {
+        if (db.open) {
+            db.pragma('wal_checkpoint(TRUNCATE)');
+            db.close();
+        }
+    } catch (e) {
+        console.error('Error closing database:', e.message);
+    }
+}
+
 export {
     db,
+    closeDb,
     stmts as purchases,
     battleStmts as battles,
     duckStmts as ducks,

@@ -13,13 +13,28 @@ import { resolveStripeEnabled } from './lib/stripe-flag.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Accumulate every missing required key during module load so a
+// misconfigured deploy sees the full list at once, rather than fixing one
+// var, rebooting, and discovering the next. flushRequired() exits if any
+// were missing — call it after the config object below is built.
+const missingRequired = [];
+
 function required(name) {
     const value = process.env[name];
     if (!value) {
-        console.error(`Missing required config: ${name}`);
-        process.exit(1);
+        missingRequired.push(name);
+        return undefined;
     }
     return value;
+}
+
+function flushRequired() {
+    if (missingRequired.length > 0) {
+        console.error(
+            `Missing required config: ${missingRequired.join(', ')}`
+        );
+        process.exit(1);
+    }
 }
 
 function optional(name, fallback = null) {
@@ -53,7 +68,7 @@ const STRIPE_ENABLED = resolveStripeEnabled({
     ],
 });
 
-export default {
+const config = {
     // Discord
     DISCORD_BOT_TOKEN: required('DISCORD_BOT_TOKEN'),
     GUILD_ID: '862139045974638612',
@@ -157,3 +172,8 @@ export default {
     LONG_PURCHASE_THRESHOLD: 5,
     XIPE_PURCHASE_THRESHOLD: 1,
 };
+
+// Fail fast at boot if any required key was missing — reports them all at once.
+flushRequired();
+
+export default config;

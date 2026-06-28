@@ -31,6 +31,7 @@
 import config from './config.js';
 import { client } from './discord.js';
 import { startServer } from './server.js';
+import { closeDb } from './db.js';
 import { initGiveaways } from './commands/giveaway.js';
 import { syncBotCommands } from './sync-bot-commands.js';
 import * as productCache from './lib/product-cache.js';
@@ -284,8 +285,8 @@ client.once('ready', async () => {
     console.log(`Nous online as ${client.user.tag}`);
     console.log(`Guilds: ${client.guilds.cache.map((g) => g.name).join(', ')}`);
 
-    // Start webhook server
-    startServer();
+    // Start webhook server (keep the handle for graceful shutdown)
+    httpServer = startServer();
 
     // Sync #bot-commands reference
     await syncBotCommands();
@@ -318,6 +319,49 @@ client.once('ready', async () => {
 
 client.on('error', (e) => console.error('Discord client error:', e.message));
 process.on('unhandledRejection', (e) => console.error('Unhandled rejection:', e));
+
+// =========================================================================
+// Graceful shutdown
+// =========================================================================
+//
+// systemd sends SIGTERM on restart/stop. Without a handler the process is
+// hard-killed, which can truncate the SQLite WAL mid-checkpoint and leave a
+// connection mid-transaction. We stop accepting new HTTP connections, tear
+// down the Discord client, then checkpoint + close the database. Guarded so
+// a second signal (or a SIGINT after SIGTERM) doesn't re-enter.
+let httpServer = null;
+let shuttingDown = false;
+
+async function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Received ${signal} — shutting down gracefully…`);
+
+    // Hard cap: never hang the box on a stuck close. Exit non-clean if we
+    // blow the budget so systemd can move on.
+    const forceExit = setTimeout(() => {
+        console.error('Graceful shutdown timed out — forcing exit.');
+        process.exit(1);
+    }, 10_000);
+    forceExit.unref();
+
+    try {
+        if (httpServer) {
+            await new Promise((resolve) => httpServer.close(resolve));
+        }
+        await client.destroy();
+        closeDb();
+        console.log('Shutdown complete.');
+        clearTimeout(forceExit);
+        process.exit(0);
+    } catch (e) {
+        console.error('Error during shutdown:', e.message);
+        process.exit(1);
+    }
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 // =========================================================================
 // Login
