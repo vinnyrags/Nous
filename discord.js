@@ -103,6 +103,17 @@ async function addRole(member, roleId) {
 }
 
 /**
+ * Remove a role from a member.
+ */
+async function removeRole(member, roleId) {
+    if (hasRole(member, roleId)) {
+        await member.roles.remove(roleId);
+        return true;
+    }
+    return false;
+}
+
+/**
  * Search for a guild member by exact Discord username.
  * Returns the member if found, null otherwise.
  */
@@ -127,4 +138,5 @@ export {
     findMemberByUsername,
     hasRole,
     addRole,
+    removeRole,
 };

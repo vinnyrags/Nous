@@ -35,7 +35,7 @@ import { startServer } from './server.js';
 import { closeDb } from './db.js';
 import { initGiveaways } from './commands/giveaway.js';
 import { syncBotCommands } from './sync-bot-commands.js';
-import { initWelcome } from './commands/welcome.js';
+import { initWelcome, handleWelcomeReaction, handleWelcomeReactionRemove } from './commands/welcome.js';
 import { initMinecraftChannel, handleMinecraftReaction } from './commands/minecraft.js';
 import { initLfgChannel } from './commands/lfg.js';
 import { broadcastDiscordJoin } from './lib/activity-broadcaster.js';
@@ -188,22 +188,36 @@ client.on('guildMemberAdd', (member) => {
 });
 
 // =========================================================================
-// Reaction handler — Minecraft react-for-DM invites
+// Reaction handlers — Minecraft react-for-DM invites + Ena self-assign
 // =========================================================================
 
-client.on('messageReactionAdd', async (reaction, user) => {
-    if (user.bot) return;
+async function hydrateReaction(reaction, user) {
+    if (user.bot) return false;
     if (reaction.partial) {
-        try { await reaction.fetch(); } catch { return; }
+        try { await reaction.fetch(); } catch { return false; }
     }
     if (user.partial) {
-        try { await user.fetch(); } catch { return; }
+        try { await user.fetch(); } catch { return false; }
     }
+    return true;
+}
 
+client.on('messageReactionAdd', async (reaction, user) => {
+    if (!(await hydrateReaction(reaction, user))) return;
     try {
         await handleMinecraftReaction(reaction, user);
+        await handleWelcomeReaction(reaction, user);
     } catch (e) {
         logger.error('Error handling messageReactionAdd:', e.message);
+    }
+});
+
+client.on('messageReactionRemove', async (reaction, user) => {
+    if (!(await hydrateReaction(reaction, user))) return;
+    try {
+        await handleWelcomeReactionRemove(reaction, user);
+    } catch (e) {
+        logger.error('Error handling messageReactionRemove:', e.message);
     }
 });
 
