@@ -1,8 +1,7 @@
 /**
  * Enrich the Singles tab via the Pokemon TCG API.
  *
- * Assumes the sheet has been migrated to the A-T schema (see
- * scripts/shop/migrate-singles-schema.js). For each row, queries
+ * Assumes the sheet uses the A-T Singles schema. For each row, queries
  * api.pokemontcg.io with parsed Card Name + Card Number and fills
  * the still-blank enrichment slots:
  *
