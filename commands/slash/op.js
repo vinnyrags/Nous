@@ -15,25 +15,13 @@ import config from '../../config.js';
 import { buildSyntheticMessage } from '../../lib/synthetic-message.js';
 
 import { handleLive, handleOffline } from '../live.js';
-import { handleBattle } from '../battle.js';
 import { handleQueue, handleDuckRace } from '../queue.js';
-import { handleLink } from '../link.js';
-import { handleSell, handleList, handleSold } from '../card-shop.js';
-import { handleShipping } from '../shipping.js';
-import { handleHype } from '../hype.js';
 import { handleDroppedOff } from '../dropped-off.js';
 import { handleSnapshot } from '../snapshot.js';
 import { handleGiveaway } from '../giveaway.js';
 import { handleSpin } from '../spin.js';
 import { handleCapture } from '../capture.js';
-import { handleSync } from '../sync.js';
-import { handleCoupon } from '../coupon.js';
-import { handleIntl, handleIntlShip } from '../intl.js';
-import { handleShippingAudit } from '../shipping-audit.js';
-import { handleWaive } from '../waive.js';
-import { handleRefund } from '../refund.js';
 import { handleNous } from '../nous.js';
-import { handlePull } from '../pull.js';
 import { handleTracking } from '../tracking.js';
 import { handleShipments } from '../shipments.js';
 
@@ -43,28 +31,13 @@ import { handleShipments } from '../shipments.js';
 const ROUTES = {
     live: (msg) => handleLive(msg),
     offline: (msg) => handleOffline(msg),
-    battle: handleBattle,
     duckrace: handleDuckRace,
-    link: handleLink,
-    sell: handleSell,
-    list: handleList,
-    sold: handleSold,
-    shipping: handleShipping,
-    hype: handleHype,
     'dropped-off': handleDroppedOff,
     snapshot: handleSnapshot,
     giveaway: handleGiveaway,
     spin: handleSpin,
     capture: handleCapture,
-    sync: handleSync,
-    coupon: handleCoupon,
-    intl: handleIntl,
-    'intl-ship': (msg) => handleIntlShip(msg),
-    'shipping-audit': handleShippingAudit,
-    waive: handleWaive,
-    refund: handleRefund,
     nous: handleNous,
-    pull: handlePull,
     tracking: handleTracking,
     shipments: handleShipments,
     'ship-status': (msg, args) => handleShipments(msg, ['status', ...(args || [])]),

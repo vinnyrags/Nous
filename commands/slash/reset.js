@@ -19,7 +19,6 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 import config from '../../config.js';
 import { db } from '../../db.js';
-import { initCommunityGoals } from '../../community-goals.js';
 import * as queueSource from '../../lib/queue-source.js';
 
 // Tables wiped — must agree with the underlying handleReset() in commands/reset.js
@@ -158,8 +157,6 @@ export async function handleResetSlash(interaction) {
     } catch (e) {
         console.error('[reset] WP queue wipe failed:', e.message);
     }
-
-    await initCommunityGoals();
 
     const wpLine = wpReset && !wpReset.sqliteHandledExternally
         ? `WP queue wiped: ${wpReset.sessionsDeleted} session(s), ${wpReset.entriesDeleted} entries.`

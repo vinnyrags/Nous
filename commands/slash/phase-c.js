@@ -9,42 +9,13 @@
  */
 
 import { defineSlashCommand } from './factory.js';
-import { handleSell, handleList, handleSold } from '../card-shop.js';
-import { handlePull } from '../pull.js';
 import { handleGiveaway } from '../giveaway.js';
 import { handleDroppedOff } from '../dropped-off.js';
 import { handleSnapshot } from '../snapshot.js';
 import { handleCapture } from '../capture.js';
-import { handleCoupon } from '../coupon.js';
-import { handleIntl, handleIntlShip } from '../intl.js';
-import { handleShippingAudit } from '../shipping-audit.js';
-import { handleWaive } from '../waive.js';
-import { handleRefund } from '../refund.js';
 import { handleNous } from '../nous.js';
 import { handleTracking } from '../tracking.js';
 import { handleShipments } from '../shipments.js';
-import { handleShipping } from '../shipping.js';
-import { handleLink } from '../link.js';
-
-// /link is user-facing — buyers self-link their email to their Discord ID.
-// Akivili check OFF so anyone can use it.
-export const handleLinkSlash = defineSlashCommand({
-    name: 'link',
-    handler: handleLink,
-    akiviliOnly: false,
-    argsBuilder: (i) => [i.options.getString('email', true)],
-});
-
-// /pull — subcommands: open, close, replenish, status
-export const handlePullSlash = defineSlashCommand({
-    name: 'pull',
-    handler: handlePull,
-    argsBuilder: (i) => {
-        const sub = i.options.getSubcommand();
-        const extra = i.options.getString('args');
-        return extra ? [sub, ...extra.split(/\s+/)] : [sub];
-    },
-});
 
 // /giveaway — subcommands: start, close, cancel, status, test, clean, off
 export const handleGiveawaySlash = defineSlashCommand({
@@ -54,20 +25,6 @@ export const handleGiveawaySlash = defineSlashCommand({
         const sub = i.options.getSubcommand();
         const extra = i.options.getString('args');
         return extra ? [sub, ...extra.split(/\s+/)] : [sub];
-    },
-});
-
-// /coupon — subcommands: create amount:<int>, off, status
-export const handleCouponSlash = defineSlashCommand({
-    name: 'coupon',
-    handler: handleCoupon,
-    argsBuilder: (i) => {
-        const sub = i.options.getSubcommand();
-        if (sub === 'create') {
-            const amount = i.options.getInteger('amount', true);
-            return ['create', String(amount)];
-        }
-        return [sub];
     },
 });
 
@@ -92,29 +49,6 @@ export const handleShipmentsSlash = defineSlashCommand({
         const sub = i.options.getSubcommand(false) || 'list';
         return sub === 'list' ? [] : [sub];
     },
-});
-
-// /refund — subcommands: full session:<string>, partial session:<string> amount:<int>
-export const handleRefundSlash = defineSlashCommand({
-    name: 'refund',
-    handler: handleRefund,
-    argsBuilder: (i) => {
-        const sub = i.options.getSubcommand();
-        const session = i.options.getString('session', true);
-        if (sub === 'partial') {
-            const amount = i.options.getInteger('amount', true);
-            return ['session', session, String(amount)];
-        }
-        return ['session', session];
-    },
-});
-
-// /waive — single user mention (waives shipping for that buyer)
-export const handleWaiveSlash = defineSlashCommand({
-    name: 'waive',
-    handler: handleWaive,
-    userOption: 'user',
-    argsBuilder: () => [],
 });
 
 // /snapshot — capture current state (free-form args)
@@ -144,43 +78,6 @@ export const handleNousSlash = defineSlashCommand({
     },
 });
 
-// /shipping — shipping admin (free-form args)
-export const handleShippingAdminSlash = defineSlashCommand({
-    name: 'shipping',
-    handler: handleShipping,
-    argsBuilder: (i) => {
-        const args = i.options.getString('args');
-        return args ? args.split(/\s+/) : [];
-    },
-});
-
-// /shipping-audit — audit shipping coverage
-export const handleShippingAuditSlash = defineSlashCommand({
-    name: 'shipping-audit',
-    handler: handleShippingAudit,
-    argsBuilder: (i) => {
-        const args = i.options.getString('args');
-        return args ? args.split(/\s+/) : [];
-    },
-});
-
-// /intl — international shipping (subcommand: list, default = current intl status)
-export const handleIntlSlash = defineSlashCommand({
-    name: 'intl',
-    handler: handleIntl,
-    argsBuilder: (i) => {
-        const sub = i.options.getSubcommand(false);
-        return sub ? [sub] : [];
-    },
-});
-
-// /intl-ship — auto-DM intl buyers about shipping difference
-export const handleIntlShipSlash = defineSlashCommand({
-    name: 'intl-ship',
-    handler: (msg) => handleIntlShip(msg),
-    argsBuilder: () => [],
-});
-
 // /dropped-off — mark batch dropped off
 export const handleDroppedOffSlash = defineSlashCommand({
     name: 'dropped-off',
@@ -188,36 +85,5 @@ export const handleDroppedOffSlash = defineSlashCommand({
     argsBuilder: (i) => {
         const intl = i.options.getBoolean('intl');
         return intl ? ['intl'] : [];
-    },
-});
-
-// /sell — list a card for sale
-export const handleSellSlash = defineSlashCommand({
-    name: 'sell',
-    handler: handleSell,
-    argsBuilder: (i) => {
-        const args = i.options.getString('args', true);
-        return args.split(/\s+/);
-    },
-});
-
-// /list — list-session lifecycle (open, add, close)
-export const handleListSlash = defineSlashCommand({
-    name: 'list',
-    handler: handleList,
-    argsBuilder: (i) => {
-        const sub = i.options.getSubcommand();
-        const extra = i.options.getString('args');
-        return extra ? [sub, ...extra.split(/\s+/)] : [sub];
-    },
-});
-
-// /sold — mark a listing as sold
-export const handleSoldSlash = defineSlashCommand({
-    name: 'sold',
-    handler: handleSold,
-    argsBuilder: (i) => {
-        const args = i.options.getString('args', true);
-        return args.split(/\s+/);
     },
 });

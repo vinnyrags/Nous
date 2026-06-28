@@ -6,13 +6,7 @@
  */
 
 import 'dotenv/config';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { resolveStripeEnabled } from './lib/stripe-flag.js';
 import { logger } from './lib/logger.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Accumulate every missing required key during module load so a
 // misconfigured deploy sees the full list at once, rather than fixing one
@@ -42,43 +36,10 @@ function optional(name, fallback = null) {
     return process.env[name] || fallback;
 }
 
-/**
- * Read a wp-config-env.php candidate, or null if it isn't reachable from
- * this layout. Decision logic lives in lib/stripe-flag.js (pure/testable);
- * this just supplies the file bodies in priority order.
- *
- * Precedence (in resolveStripeEnabled): explicit STRIPE_ENABLED env var
- * (primary in production, where the bot can't see WordPress's
- * wp-config-env.php) → the single-source `define('STRIPE_ENABLED', …)` in
- * WordPress's wp-config-env.php (sibling repo in the local dev layout) →
- * default true (backward-compatible: only an explicit `false` parks Stripe).
- */
-function readWpConfig(file) {
-    try {
-        return readFileSync(file, 'utf8');
-    } catch {
-        return null;
-    }
-}
-
-const STRIPE_ENABLED = resolveStripeEnabled({
-    envValue: process.env.STRIPE_ENABLED,
-    fileContents: [
-        readWpConfig(join(__dirname, 'wp-config-env.php')),
-        readWpConfig(join(__dirname, '../vincentragosta.io/wp-config-env.php')),
-    ],
-});
-
 const config = {
     // Discord
     DISCORD_BOT_TOKEN: required('DISCORD_BOT_TOKEN'),
     GUILD_ID: '862139045974638612',
-
-    // Stripe (parked behind STRIPE_ENABLED for the Whatnot pivot — when
-    // off the key is optional so the bot still boots without it)
-    STRIPE_ENABLED,
-    STRIPE_SECRET_KEY: STRIPE_ENABLED ? required('STRIPE_SECRET_KEY') : optional('STRIPE_SECRET_KEY'),
-    STRIPE_WEBHOOK_SECRET: optional('STRIPE_BOT_WEBHOOK_SECRET'),
 
     // Twitch
     TWITCH_CLIENT_ID: optional('TWITCH_CLIENT_ID'),

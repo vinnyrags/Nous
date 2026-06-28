@@ -35,13 +35,10 @@ import { startServer } from './server.js';
 import { closeDb } from './db.js';
 import { initGiveaways } from './commands/giveaway.js';
 import { syncBotCommands } from './sync-bot-commands.js';
-import * as productCache from './lib/product-cache.js';
-import { initCommunityGoals } from './community-goals.js';
 import { initWelcome } from './commands/welcome.js';
 import { initMinecraftChannel, handleMinecraftReaction } from './commands/minecraft.js';
 import { initLfgChannel } from './commands/lfg.js';
 import { broadcastDiscordJoin } from './lib/activity-broadcaster.js';
-import { STRIPE_GATED_COMMANDS, isStripeGatedButton, handleStripeParked } from './lib/stripe-gate.js';
 // =========================================================================
 // Legacy !command text dispatcher removed 2026-05-03 — all ops commands
 // run as Discord slash commands now (see SLASH_HANDLERS below). Clean
@@ -56,67 +53,34 @@ import { handleOp, ROUTE_NAMES } from './commands/slash/op.js';
 import { handleQueueSlash } from './commands/slash/queue.js';
 import { handleResetSlash } from './commands/slash/reset.js';
 import { handleLiveSlash, handleOfflineSlash } from './commands/slash/live.js';
-import { handleSyncSlash } from './commands/slash/sync.js';
-import { handleHypeSlash } from './commands/slash/hype.js';
-import { handleBattleSlash } from './commands/slash/battle.js';
 import { handleDuckRaceSlash } from './commands/slash/duckrace.js';
 import { handleSpinSlash } from './commands/slash/spin.js';
 import {
-    handleLinkSlash,
-    handlePullSlash,
     handleGiveawaySlash,
-    handleCouponSlash,
     handleTrackingSlash,
     handleShipmentsSlash,
-    handleRefundSlash,
-    handleWaiveSlash,
     handleSnapshotSlash,
     handleCaptureSlash,
     handleNousSlash,
-    handleShippingAdminSlash,
-    handleShippingAuditSlash,
-    handleIntlSlash,
-    handleIntlShipSlash,
     handleDroppedOffSlash,
-    handleSellSlash,
-    handleListSlash,
-    handleSoldSlash,
 } from './commands/slash/phase-c.js';
 import { withAudit } from './lib/op-audit.js';
 
 const SLASH_HANDLERS = {
-    // Phase A
     op: withAudit('op', handleOp),
     queue: withAudit('queue', handleQueueSlash),
     reset: withAudit('reset', handleResetSlash),
-    // Phase B (high-frequency native)
     live: withAudit('live', handleLiveSlash),
     offline: withAudit('offline', handleOfflineSlash),
-    sync: withAudit('sync', handleSyncSlash),
-    hype: withAudit('hype', handleHypeSlash),
-    battle: withAudit('battle', handleBattleSlash),
     duckrace: withAudit('duckrace', handleDuckRaceSlash),
     spin: withAudit('spin', handleSpinSlash),
-    // Phase C (mid/low-frequency native)
-    link: withAudit('link', handleLinkSlash),
-    pull: withAudit('pull', handlePullSlash),
     giveaway: withAudit('giveaway', handleGiveawaySlash),
-    coupon: withAudit('coupon', handleCouponSlash),
     tracking: withAudit('tracking', handleTrackingSlash),
     shipments: withAudit('shipments', handleShipmentsSlash),
-    refund: withAudit('refund', handleRefundSlash),
-    waive: withAudit('waive', handleWaiveSlash),
     snapshot: withAudit('snapshot', handleSnapshotSlash),
     capture: withAudit('capture', handleCaptureSlash),
     nous: withAudit('nous', handleNousSlash),
-    shipping: withAudit('shipping', handleShippingAdminSlash),
-    'shipping-audit': withAudit('shipping-audit', handleShippingAuditSlash),
-    intl: withAudit('intl', handleIntlSlash),
-    'intl-ship': withAudit('intl-ship', handleIntlShipSlash),
     'dropped-off': withAudit('dropped-off', handleDroppedOffSlash),
-    sell: withAudit('sell', handleSellSlash),
-    list: withAudit('list', handleListSlash),
-    sold: withAudit('sold', handleSoldSlash),
 };
 
 // =========================================================================
@@ -135,32 +99,6 @@ async function routeAutocomplete(interaction) {
             .slice(0, 25)
             .map((name) => ({ name, value: name }));
         return interaction.respond(matches);
-    }
-
-    if (interaction.commandName === 'battle' && focused.name === 'product') {
-        // /battle start product:<name> — single product, classic autocomplete
-        return interaction.respond(productCache.suggest(value, 25));
-    }
-
-    if (interaction.commandName === 'hype' && focused.name === 'products') {
-        // /hype products:"Crown Zenith ETB, Prismatic Evolutions" — multi-
-        // product comma list. Autocomplete only the LAST term after the
-        // last comma; preserve everything before it. The picked suggestion
-        // replaces the last term inline.
-        const lastComma = value.lastIndexOf(',');
-        const prefix = lastComma >= 0 ? value.slice(0, lastComma + 1).trimEnd() + ' ' : '';
-        const tail = lastComma >= 0 ? value.slice(lastComma + 1).trimStart() : value.trim();
-        const tailMatches = productCache.suggest(tail, 25);
-        const choices = tailMatches.map(({ name }) => {
-            const composed = `${prefix}${name}`;
-            // Discord caps choice value at 100 chars; truncate if the
-            // composed string overflows
-            return {
-                name: composed.length <= 100 ? composed : `…${name}`.slice(0, 100),
-                value: composed.slice(0, 100),
-            };
-        });
-        return interaction.respond(choices);
     }
 
     // No autocomplete handler registered for this option — return empty so
@@ -190,11 +128,6 @@ client.on('interactionCreate', async (interaction) => {
         if (!handler) {
             return interaction.reply({ content: `No handler for /${interaction.commandName}`, ephemeral: true });
         }
-        // Stripe parked (Whatnot pivot) — gated checkout commands reply
-        // "paused" instead of constructing the Stripe SDK with no key.
-        if (STRIPE_GATED_COMMANDS.has(interaction.commandName) && await handleStripeParked(interaction)) {
-            return;
-        }
         try {
             await handler(interaction);
         } catch (e) {
@@ -216,10 +149,6 @@ client.on('interactionCreate', async (interaction) => {
         const { handleButtonInteraction, handleModalSubmit, handleSelectMenuInteraction } = await import('./commands/interactions.js');
 
         if (interaction.isButton()) {
-            // Stripe parked (Whatnot pivot) — buy buttons reply "paused".
-            if (isStripeGatedButton(interaction.customId) && await handleStripeParked(interaction)) {
-                return;
-            }
             await handleButtonInteraction(interaction);
         } else if (interaction.isStringSelectMenu()) {
             await handleSelectMenuInteraction(interaction);
@@ -291,15 +220,6 @@ client.once('ready', async () => {
 
     // Sync #bot-commands reference
     await syncBotCommands();
-
-    // Warm the Stripe product cache for autocomplete (non-blocking — if
-    // Stripe is unreachable we fall back to empty suggestions, no crash)
-    if (config.STRIPE_ENABLED) {
-        productCache.refresh().catch(() => {});
-    }
-
-    // Initialize community goals pinned message
-    await initCommunityGoals();
 
     // Initialize welcome embed in #welcome
     await initWelcome();

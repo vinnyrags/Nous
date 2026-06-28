@@ -14,7 +14,6 @@
 import { EmbedBuilder } from 'discord.js';
 import { db } from '../db.js';
 import config from '../config.js';
-import { initCommunityGoals } from '../community-goals.js';
 import * as queueSource from '../lib/queue-source.js';
 
 // Order matters — child tables before parents (foreign key constraints)
@@ -123,9 +122,6 @@ async function handleReset(message) {
             .setDescription(`Local SQLite cleared, but the WP queue (sessions + entries) was not. Manual cleanup may be needed.\n\n\`${e.message}\``)
             .setColor(0xe74c3c)] });
     }
-
-    // Refresh the #restock-tracker pinned message
-    await initCommunityGoals();
 
     const wpLine = wpReset && !wpReset.sqliteHandledExternally
         ? `\nWP queue wiped: ${wpReset.sessionsDeleted} session(s), ${wpReset.entriesDeleted} entry/entries.`

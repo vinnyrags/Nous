@@ -9,7 +9,7 @@
  * merged here 2026-06-04 when that channel was archived).
  */
 
-import { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } from 'discord.js';
+import { EmbedBuilder } from 'discord.js';
 import config from '../config.js';
 import { client, getChannel } from '../discord.js';
 
@@ -33,12 +33,6 @@ function buildWelcomeEmbed() {
                     '<#' + config.CHANNELS.ANNOUNCEMENTS + '> — Whatnot show announcements, drops, news',
                     '<#' + config.CHANNELS.LOOKING_FOR_GROUP + '> — Find a squad, see what we\'re playing',
                 ].join('\n'),
-            },
-            {
-                name: 'Link Your Account',
-                value:
-                    'Bought from the shop before? Click the **Link Account** button below and enter the email you used at checkout. ' +
-                    'This connects your purchase history to your Discord profile and unlocks automatic role upgrades as you hit purchase milestones.',
             },
             {
                 name: 'Get Verified',
@@ -82,16 +76,6 @@ function buildHowItWorksEmbed() {
         .setColor(0xceff00);
 }
 
-function buildWelcomeButton() {
-    const button = new ButtonBuilder()
-        .setCustomId('welcome-link')
-        .setLabel('Link Account')
-        .setStyle(ButtonStyle.Primary)
-        .setEmoji('🔗');
-
-    return new ActionRowBuilder().addComponents(button);
-}
-
 /**
  * Ensure the welcome embed exists in #welcome on bot startup.
  * Edits the existing message if found, posts fresh if missing.
@@ -106,13 +90,14 @@ async function initWelcome() {
         }
 
         const embeds = [buildWelcomeEmbed(), buildHowItWorksEmbed()];
-        const row = buildWelcomeButton();
         const row_config = welcome.getConfig.get();
 
         if (row_config?.channel_message_id) {
             try {
                 const msg = await channel.messages.fetch(row_config.channel_message_id);
-                await msg.edit({ embeds, components: [row] });
+                // components: [] clears the retired "Link Account" button from
+                // any existing welcome message on restart.
+                await msg.edit({ embeds, components: [] });
                 console.log('Welcome embed updated');
                 return;
             } catch {
@@ -120,7 +105,7 @@ async function initWelcome() {
             }
         }
 
-        const msg = await channel.send({ embeds, components: [row] });
+        const msg = await channel.send({ embeds });
         welcome.setMessageId.run(msg.id);
         console.log('Welcome embed posted');
     } catch (e) {

@@ -1,12 +1,9 @@
 {
   "name": "nous-bot",
   "version": "1.0.0",
-  "description": "Nous — Discord bot for itzenzo.tv. Order notifications, pack battles, stream alerts, and more.",
+  "description": "Nous — Discord bot for itzenzo.tv. Stream alerts, queue, giveaways, tracking, and community features.",
   "type": "module",
   "main": "index.js",
-  "workspaces": [
-    "packages/*"
-  ],
   "engines": {
     "node": "20.x"
   },
@@ -15,18 +12,13 @@
     "dev": "node --watch index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:critical": "node bin/run-test-suite.mjs",
-    "test:critical:droplet": "ssh root@174.138.70.29 'cd /opt/nous-bot && PATH=/root/.nvm/versions/node/v20.20.2/bin:$PATH npm run test:critical'",
-    "test:e2e:storefront": "npm --prefix ../itzenzo.tv run test:e2e:staging",
-    "test:pre-stream": "npm run test:critical:droplet && npm run test:e2e:storefront"
+    "test:e2e:storefront": "npm --prefix ../itzenzo.tv run test:e2e:staging"
   },
   "dependencies": {
-    "@itzenzottv/stripe-bridge": "*",
     "better-sqlite3": "^11.0.0",
     "discord.js": "^14.25.1",
     "dotenv": "^17.4.2",
-    "express": "^4.21.0",
-    "stripe": "^21.0.0"
+    "express": "^4.21.0"
   },
   "devDependencies": {
     "fast-check": "^4.7.0",
