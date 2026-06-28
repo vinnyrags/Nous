@@ -7,6 +7,7 @@
  */
 
 import crypto from 'node:crypto';
+import { logger } from '../lib/logger.js';
 import config from '../config.js';
 import { tracking, purchases } from '../db.js';
 import { sendEmbed } from '../discord.js';
@@ -47,7 +48,7 @@ function verifySignature(req) {
  */
 async function fetchOrderRecipientEmail(orderNumber) {
     if (!config.SHIPPINGEASY_API_KEY || !config.SHIPPINGEASY_API_SECRET) {
-        console.error('ShippingEasy API credentials not configured');
+        logger.error('ShippingEasy API credentials not configured');
         return null;
     }
 
@@ -71,7 +72,7 @@ async function fetchOrderRecipientEmail(orderNumber) {
         const url = `https://app.shippingeasy.com${path}?${sortedParams}&api_signature=${signature}`;
         const response = await fetch(url);
         if (!response.ok) {
-            console.error(`ShippingEasy API error: ${response.status} ${response.statusText}`);
+            logger.error(`ShippingEasy API error: ${response.status} ${response.statusText}`);
             return null;
         }
 
@@ -91,7 +92,7 @@ async function fetchOrderRecipientEmail(orderNumber) {
 
         return null;
     } catch (e) {
-        console.error('ShippingEasy order fetch failed:', e.message);
+        logger.error('ShippingEasy order fetch failed:', e.message);
         return null;
     }
 }
@@ -102,7 +103,7 @@ async function fetchOrderRecipientEmail(orderNumber) {
 async function handleShippingEasyWebhook(req, res) {
     // Verify signature
     if (!verifySignature(req)) {
-        console.error('Invalid ShippingEasy webhook signature');
+        logger.error('Invalid ShippingEasy webhook signature');
         return res.status(401).send('Invalid signature');
     }
 
@@ -125,11 +126,11 @@ async function handleShippingEasyWebhook(req, res) {
     } = shipment;
 
     if (!trackingNumber) {
-        console.log('ShippingEasy webhook: no tracking number in payload');
+        logger.info('ShippingEasy webhook: no tracking number in payload');
         return res.status(200).send('OK');
     }
 
-    console.log(`ShippingEasy label.purchased: ${trackingNumber} (${carrier}) for order ${orderNumber}`);
+    logger.info(`ShippingEasy label.purchased: ${trackingNumber} (${carrier}) for order ${orderNumber}`);
 
     // Try to match buyer — first by external_order_identifier (Stripe session ID), then by API
     let customerEmail = null;
@@ -161,7 +162,7 @@ async function handleShippingEasyWebhook(req, res) {
         trackingUrl || null,
     );
 
-    console.log(`Tracking stored: ${trackingNumber} → ${customerEmail || 'no email'} (${discordUserId || 'no Discord link'})`);
+    logger.info(`Tracking stored: ${trackingNumber} → ${customerEmail || 'no email'} (${discordUserId || 'no Discord link'})`);
 
     // Post to #shipping-labels
     await sendEmbed('SHIPPING_LABELS', {
@@ -174,7 +175,7 @@ async function handleShippingEasyWebhook(req, res) {
             discordUserId ? `**Buyer:** <@${discordUserId}>` : null,
         ].filter(Boolean).join('\n'),
         color: 0x3498db,
-    }).catch(e => console.error('Failed to post to #shipping-labels:', e.message));
+    }).catch(e => logger.error('Failed to post to #shipping-labels:', e.message));
 
     res.status(200).send('OK');
 }

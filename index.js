@@ -29,6 +29,7 @@
  */
 
 import config from './config.js';
+import { logger } from './lib/logger.js';
 import { client } from './discord.js';
 import { startServer } from './server.js';
 import { closeDb } from './db.js';
@@ -177,7 +178,7 @@ client.on('interactionCreate', async (interaction) => {
         try {
             await routeAutocomplete(interaction);
         } catch (e) {
-            console.error('Autocomplete error:', e.message);
+            logger.error('Autocomplete error:', e.message);
             try { await interaction.respond([]); } catch { /* timed out */ }
         }
         return;
@@ -197,7 +198,7 @@ client.on('interactionCreate', async (interaction) => {
         try {
             await handler(interaction);
         } catch (e) {
-            console.error(`Error handling /${interaction.commandName}:`, e.message);
+            logger.error(`Error handling /${interaction.commandName}:`, e.message);
             try {
                 if (interaction.replied || interaction.deferred) {
                     await interaction.followUp({ content: `Failed: ${e.message}`, ephemeral: true });
@@ -226,7 +227,7 @@ client.on('interactionCreate', async (interaction) => {
             await handleModalSubmit(interaction);
         }
     } catch (e) {
-        console.error('Error handling interaction:', e.message);
+        logger.error('Error handling interaction:', e.message);
         try {
             if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({ content: 'Something went wrong. Try again or ping a mod.', ephemeral: true });
@@ -253,7 +254,7 @@ client.on('guildMemberAdd', (member) => {
     try {
         broadcastDiscordJoin();
     } catch (e) {
-        console.error('Error broadcasting discord join:', e.message);
+        logger.error('Error broadcasting discord join:', e.message);
     }
 });
 
@@ -273,7 +274,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
     try {
         await handleMinecraftReaction(reaction, user);
     } catch (e) {
-        console.error('Error handling messageReactionAdd:', e.message);
+        logger.error('Error handling messageReactionAdd:', e.message);
     }
 });
 
@@ -282,8 +283,8 @@ client.on('messageReactionAdd', async (reaction, user) => {
 // =========================================================================
 
 client.once('ready', async () => {
-    console.log(`Nous online as ${client.user.tag}`);
-    console.log(`Guilds: ${client.guilds.cache.map((g) => g.name).join(', ')}`);
+    logger.info(`Nous online as ${client.user.tag}`);
+    logger.info(`Guilds: ${client.guilds.cache.map((g) => g.name).join(', ')}`);
 
     // Start webhook server (keep the handle for graceful shutdown)
     httpServer = startServer();
@@ -317,8 +318,8 @@ client.once('ready', async () => {
 // Error handling
 // =========================================================================
 
-client.on('error', (e) => console.error('Discord client error:', e.message));
-process.on('unhandledRejection', (e) => console.error('Unhandled rejection:', e));
+client.on('error', (e) => logger.error('Discord client error:', e.message));
+process.on('unhandledRejection', (e) => logger.error('Unhandled rejection:', e));
 
 // =========================================================================
 // Graceful shutdown
@@ -335,12 +336,12 @@ let shuttingDown = false;
 async function shutdown(signal) {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`Received ${signal} — shutting down gracefully…`);
+    logger.info(`Received ${signal} — shutting down gracefully…`);
 
     // Hard cap: never hang the box on a stuck close. Exit non-clean if we
     // blow the budget so systemd can move on.
     const forceExit = setTimeout(() => {
-        console.error('Graceful shutdown timed out — forcing exit.');
+        logger.error('Graceful shutdown timed out — forcing exit.');
         process.exit(1);
     }, 10_000);
     forceExit.unref();
@@ -351,11 +352,11 @@ async function shutdown(signal) {
         }
         await client.destroy();
         closeDb();
-        console.log('Shutdown complete.');
+        logger.info('Shutdown complete.');
         clearTimeout(forceExit);
         process.exit(0);
     } catch (e) {
-        console.error('Error during shutdown:', e.message);
+        logger.error('Error during shutdown:', e.message);
         process.exit(1);
     }
 }

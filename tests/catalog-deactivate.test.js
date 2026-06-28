@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { logger } from '../lib/logger.js';
 
 vi.mock('../config.js', () => ({
     default: {
@@ -65,7 +66,7 @@ describe('notifyCatalogProductDeactivated', () => {
             status: 500,
             json: async () => ({}),
         });
-        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const errSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
         await expect(notifyCatalogProductDeactivated('prod_x')).resolves.toBeUndefined();
         expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('500'));
         errSpy.mockRestore();
@@ -73,7 +74,7 @@ describe('notifyCatalogProductDeactivated', () => {
 
     it('logs but does not throw on network rejection', async () => {
         globalThis.fetch = vi.fn().mockRejectedValue(new Error('econnreset'));
-        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const errSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
         await expect(notifyCatalogProductDeactivated('prod_y')).resolves.toBeUndefined();
         expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('prod_y'), 'econnreset');
         errSpy.mockRestore();
@@ -85,7 +86,7 @@ describe('notifyCatalogProductDeactivated', () => {
             status: 200,
             json: async () => ({ matched: 3, updated: 3 }),
         });
-        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const logSpy = vi.spyOn(logger, 'info').mockImplementation(() => {});
         await notifyCatalogProductDeactivated('prod_z');
         expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('cleared 3/3 WP post(s)'));
         logSpy.mockRestore();
@@ -97,7 +98,7 @@ describe('notifyCatalogProductDeactivated', () => {
             status: 200,
             json: async () => ({ matched: 0, updated: 0 }),
         });
-        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const logSpy = vi.spyOn(logger, 'info').mockImplementation(() => {});
         await notifyCatalogProductDeactivated('prod_unknown');
         // Don't spam logs for the common no-op case
         expect(logSpy).not.toHaveBeenCalled();

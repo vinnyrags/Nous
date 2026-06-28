@@ -10,6 +10,7 @@
  */
 
 import { EmbedBuilder } from 'discord.js';
+import { logger } from '../lib/logger.js';
 import Stripe from 'stripe';
 import { listSessionLineItems } from '@itzenzottv/stripe-bridge';
 import config from '../config.js';
@@ -61,7 +62,7 @@ async function handleCheckoutCritical(session) {
         try {
             lineItems = await listSessionLineItems(stripe, session.id, { limit: 100 });
         } catch (e) {
-            console.error('Failed to fetch line items from Stripe:', e.message);
+            logger.error('Failed to fetch line items from Stripe:', e.message);
         }
     }
 
@@ -73,7 +74,7 @@ async function handleCheckoutCritical(session) {
     if (!discordUserId && session.metadata?.discord_user_id) {
         discordUserId = session.metadata.discord_user_id;
         purchases.linkDiscord.run(discordUserId, customerEmail);
-        console.log(`Auto-linked via metadata: ${discordUserId} → ${customerEmail}`);
+        logger.info(`Auto-linked via metadata: ${discordUserId} → ${customerEmail}`);
     }
 
     // Auto-link via Discord username from checkout custom field (shop/non-Discord purchases)
@@ -85,9 +86,9 @@ async function handleCheckoutCritical(session) {
             if (member) {
                 purchases.linkDiscord.run(member.id, customerEmail);
                 discordUserId = member.id;
-                console.log(`Auto-linked ${username} (${member.id}) → ${customerEmail}`);
+                logger.info(`Auto-linked ${username} (${member.id}) → ${customerEmail}`);
             } else {
-                console.log(`Discord username "${username}" not found in server — purchase unlinked`);
+                logger.info(`Discord username "${username}" not found in server — purchase unlinked`);
             }
         }
     }
@@ -151,7 +152,7 @@ async function handleCheckoutCritical(session) {
     const shippingCountry = session.shipping_details?.address?.country;
     if (shippingCountry && shippingCountry !== 'US' && discordUserId) {
         discordLinks.setCountry.run(shippingCountry, discordUserId);
-        console.log(`Auto-flagged international: ${discordUserId} → ${shippingCountry}`);
+        logger.info(`Auto-flagged international: ${discordUserId} → ${shippingCountry}`);
     }
 
     // Store full shipping address and create ShippingEasy order
@@ -262,7 +263,7 @@ async function handleCheckoutNotifications(session, context) {
                 await dm.send({ embeds: [embed] });
             }
         } catch (e) {
-            console.error(`Failed to DM receipt to ${discordUserId}:`, e.message);
+            logger.error(`Failed to DM receipt to ${discordUserId}:`, e.message);
         }
     }
 
@@ -300,7 +301,7 @@ async function handleCheckoutNotifications(session, context) {
         });
         if (added) {
             const summary = items.map((i) => `${i.quantity}x ${i.name}`).join(', ');
-            console.log(`Queue entry: ${summary} for ${discordHandle || discordUserId || customerEmail}`);
+            logger.info(`Queue entry: ${summary} for ${discordHandle || discordUserId || customerEmail}`);
         }
     }
 
@@ -371,7 +372,7 @@ async function checkPullBoxPayment(session, discordUserId, customerEmail, lineIt
         customerEmail,
     });
 
-    console.log(`Pull box #${pullBoxId} purchase: ${(explicitSlots || []).length || quantity} slot(s) for ${discordHandle || discordUserId || customerEmail}`);
+    logger.info(`Pull box #${pullBoxId} purchase: ${(explicitSlots || []).length || quantity} slot(s) for ${discordHandle || discordUserId || customerEmail}`);
 }
 
 /**
@@ -408,7 +409,7 @@ async function checkShippingMismatch(session, discordUserId, customerEmail) {
         + `&reason=${encodeURIComponent('Shipping Difference — International')}`
         + (discordUserId ? `&user=${discordUserId}` : '');
 
-    console.log(`Shipping mismatch: ${customerEmail} paid ${shippingPaid} but address is ${shippingCountry} (owes ${difference})`);
+    logger.info(`Shipping mismatch: ${customerEmail} paid ${shippingPaid} but address is ${shippingCountry} (owes ${difference})`);
 
     if (discordUserId) {
         // DM the buyer directly
@@ -427,10 +428,10 @@ async function checkShippingMismatch(session, discordUserId, customerEmail) {
                     .setColor(0xceff00);
 
                 await dm.send({ embeds: [embed] });
-                console.log(`Sent shipping mismatch DM to ${discordUserId}`);
+                logger.info(`Sent shipping mismatch DM to ${discordUserId}`);
             }
         } catch (e) {
-            console.error(`Failed to DM buyer ${discordUserId} about shipping mismatch:`, e.message);
+            logger.error(`Failed to DM buyer ${discordUserId} about shipping mismatch:`, e.message);
         }
     }
 
@@ -460,7 +461,7 @@ async function checkShippingMismatch(session, discordUserId, customerEmail) {
             }
         }
     } catch (e) {
-        console.error('Failed to notify owner about shipping mismatch:', e.message);
+        logger.error('Failed to notify owner about shipping mismatch:', e.message);
     }
 }
 
@@ -480,7 +481,7 @@ async function checkRolePromotion(discordUserId) {
     if (count >= config.XIPE_PURCHASE_THRESHOLD) {
         const added = await addRole(member, config.ROLES.XIPE);
         if (added) {
-            console.log(`Promoted ${member.user.tag} to Xipe (${count} purchases)`);
+            logger.info(`Promoted ${member.user.tag} to Xipe (${count} purchases)`);
         }
     }
 
@@ -488,7 +489,7 @@ async function checkRolePromotion(discordUserId) {
     if (count >= config.LONG_PURCHASE_THRESHOLD) {
         if (!hasRole(member, config.ROLES.LONG)) {
             await addRole(member, config.ROLES.LONG);
-            console.log(`Promoted ${member.user.tag} to Long (${count} purchases)`);
+            logger.info(`Promoted ${member.user.tag} to Long (${count} purchases)`);
 
             // Announce promotion
             await sendEmbed('ANNOUNCEMENTS', {
@@ -517,7 +518,7 @@ async function checkBattlePayment(session, discordUserId) {
 
     if (result.changes === 0) {
         // Battle is full — entry was rejected by the subquery
-        console.log(`Battle #${battle.id} is full — payment from ${odiscordUserId} not added`);
+        logger.info(`Battle #${battle.id} is full — payment from ${odiscordUserId} not added`);
         const buyerLabel = discordUserId ? `<@${discordUserId}>` : (session.customer_details?.email || 'unknown');
         await sendEmbed('OPS', {
             title: '⚠️ Battle Overfill — Refund Needed',
@@ -564,7 +565,7 @@ async function checkBattlePayment(session, discordUserId) {
             }
         }
     } catch (e) {
-        console.error('Failed to mirror pack-battle entry to queue:', e.message);
+        logger.error('Failed to mirror pack-battle entry to queue:', e.message);
     }
 
     const entries = battles.getEntries.all(battle.id);
@@ -598,14 +599,14 @@ async function checkCardSalePayment(session, discordUserId, lineItems = []) {
 
     // Payment arrived after TTL expired — still honor the sale
     if (listing.status === 'expired') {
-        console.log(`Card listing #${listingId} was expired but payment arrived — marking as sold`);
+        logger.info(`Card listing #${listingId} was expired but payment arrived — marking as sold`);
     }
 
     // Pull boxes stay open — record entry with buyer + quantity
     if (listing.status === 'pull') {
         const quantity = lineItems[0]?.quantity || 1;
         await recordPullPurchase(listingId, discordUserId, session.customer_details?.email, quantity, session.id);
-        console.log(`Pull box #${listingId} purchase: ${listing.card_name} ×${quantity} for ${discordUserId || session.customer_details?.email}`);
+        logger.info(`Pull box #${listingId} purchase: ${listing.card_name} ×${quantity} for ${discordUserId || session.customer_details?.email}`);
         return;
     }
 
@@ -639,11 +640,11 @@ async function checkCardSalePayment(session, discordUserId, lineItems = []) {
                 await dmMsg.edit({ embeds: [embed], components: [] });
             }
         } catch (e) {
-            console.error(`Failed to update card sale DM for ${discordUserId}:`, e.message);
+            logger.error(`Failed to update card sale DM for ${discordUserId}:`, e.message);
         }
     }
 
-    console.log(`Card listing #${listingId} sold: ${listing.card_name}`);
+    logger.info(`Card listing #${listingId} sold: ${listing.card_name}`);
 }
 
 /**
@@ -675,15 +676,15 @@ export async function notifyCatalogProductDeactivated(stripeProductId) {
             body: JSON.stringify({ stripeProductId }),
         });
         if (!response.ok) {
-            console.error(`catalog-deactivate ${stripeProductId}: WP returned ${response.status}`);
+            logger.error(`catalog-deactivate ${stripeProductId}: WP returned ${response.status}`);
             return;
         }
         const data = await response.json();
         if (data.matched > 0) {
-            console.log(`catalog-deactivate ${stripeProductId}: cleared ${data.updated}/${data.matched} WP post(s)`);
+            logger.info(`catalog-deactivate ${stripeProductId}: cleared ${data.updated}/${data.matched} WP post(s)`);
         }
     } catch (e) {
-        console.error(`catalog-deactivate ${stripeProductId}:`, e.message);
+        logger.error(`catalog-deactivate ${stripeProductId}:`, e.message);
     }
 }
 

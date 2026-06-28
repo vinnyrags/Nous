@@ -5,6 +5,7 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { logger } from './lib/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1233,7 +1234,7 @@ function closeDb() {
             db.close();
         }
     } catch (e) {
-        console.error('Error closing database:', e.message);
+        logger.error('Error closing database:', e.message);
     }
 }
 

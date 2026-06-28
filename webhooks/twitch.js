@@ -10,6 +10,7 @@
  */
 
 import crypto from 'node:crypto';
+import { logger } from '../lib/logger.js';
 import config from '../config.js';
 import { sendEmbed } from '../discord.js';
 
@@ -46,7 +47,7 @@ async function handleStreamOnline(event) {
         color: 0x9146ff, // Twitch purple
     });
 
-    console.log('Posted going-live notification');
+    logger.info('Posted going-live notification');
 }
 
 /**
@@ -59,7 +60,7 @@ async function handleStreamOffline() {
         color: 0x95a5a6,
     });
 
-    console.log('Posted stream-ended notification');
+    logger.info('Posted stream-ended notification');
 }
 
 /**
@@ -70,19 +71,19 @@ async function handleTwitchWebhook(req, res) {
 
     // Handle webhook verification challenge
     if (messageType === 'webhook_callback_verification') {
-        console.log('Twitch EventSub verification challenge received');
+        logger.info('Twitch EventSub verification challenge received');
         return res.status(200).type('text/plain').send(req.body.challenge);
     }
 
     // Verify signature
     if (config.TWITCH_WEBHOOK_SECRET && !verifyTwitchSignature(req)) {
-        console.error('Invalid Twitch webhook signature');
+        logger.error('Invalid Twitch webhook signature');
         return res.status(403).send('Invalid signature');
     }
 
     // Handle revocation
     if (messageType === 'revocation') {
-        console.log('Twitch EventSub subscription revoked:', req.body.subscription?.type);
+        logger.info('Twitch EventSub subscription revoked:', req.body.subscription?.type);
         return res.sendStatus(200);
     }
 
@@ -99,10 +100,10 @@ async function handleTwitchWebhook(req, res) {
                 await handleStreamOffline();
                 break;
             default:
-                console.log('Unhandled Twitch event:', eventType);
+                logger.info('Unhandled Twitch event:', eventType);
         }
     } catch (e) {
-        console.error('Error handling Twitch event:', e.message);
+        logger.error('Error handling Twitch event:', e.message);
     }
 
     res.sendStatus(200);

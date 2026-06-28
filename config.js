@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { resolveStripeEnabled } from './lib/stripe-flag.js';
+import { logger } from './lib/logger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -30,7 +31,7 @@ function required(name) {
 
 function flushRequired() {
     if (missingRequired.length > 0) {
-        console.error(
+        logger.error(
             `Missing required config: ${missingRequired.join(', ')}`
         );
         process.exit(1);

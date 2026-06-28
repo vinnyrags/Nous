@@ -10,6 +10,7 @@
  */
 
 import express from 'express';
+import { logger } from './lib/logger.js';
 import Stripe from 'stripe';
 import { buildCheckoutSessionParams, preflightPriceActive, constructWebhookEvent, createCheckoutSession } from '@itzenzottv/stripe-bridge';
 import config from './config.js';
@@ -130,7 +131,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
                 secret: config.STRIPE_WEBHOOK_SECRET,
             });
         } catch (e) {
-            console.error('Stripe signature verification failed:', e.message);
+            logger.error('Stripe signature verification failed:', e.message);
             return res.status(400).send('Invalid signature');
         }
     } else {
@@ -148,7 +149,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
         process.env.NODE_ENV === 'production' &&
         event?.data?.object?.metadata?.test === '1'
     ) {
-        console.log(`[stripe] skipping test event ${event.id} on production`);
+        logger.info(`[stripe] skipping test event ${event.id} on production`);
         return res.sendStatus(200);
     }
 
@@ -160,7 +161,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
     if (event?.id) {
         const claimed = stripeEvents.claimEvent.run(event.id);
         if (claimed.changes === 0) {
-            console.log(`Stripe event ${event.id} already processed — skipping`);
+            logger.info(`Stripe event ${event.id} already processed — skipping`);
             return res.sendStatus(200);
         }
     }
@@ -176,7 +177,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
                 // Phase 2: Notifications — fire-and-forget after responding to Stripe
                 if (context) {
                     handleCheckoutNotifications(event.data.object, context).catch(e =>
-                        console.error('Notification error:', e.message)
+                        logger.error('Notification error:', e.message)
                     );
                 }
                 return;
@@ -192,7 +193,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
                 res.sendStatus(200);
                 if (product?.active === false && wasActive === true) {
                     notifyCatalogProductDeactivated(product.id).catch(e =>
-                        console.error('catalog notify error:', e.message)
+                        logger.error('catalog notify error:', e.message)
                     );
                 }
                 return;
@@ -202,7 +203,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
                 res.sendStatus(200);
                 if (product?.id) {
                     notifyCatalogProductDeactivated(product.id).catch(e =>
-                        console.error('catalog notify error:', e.message)
+                        logger.error('catalog notify error:', e.message)
                     );
                 }
                 return;
@@ -215,7 +216,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
                     const productId = priceEventProductId(price);
                     if (productId) {
                         notifyCatalogProductDeactivated(productId).catch(e =>
-                            console.error('catalog notify error:', e.message)
+                            logger.error('catalog notify error:', e.message)
                         );
                     }
                 }
@@ -227,7 +228,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
                 const productId = priceEventProductId(price);
                 if (productId) {
                     notifyCatalogProductDeactivated(productId).catch(e =>
-                        console.error('catalog notify error:', e.message)
+                        logger.error('catalog notify error:', e.message)
                     );
                 }
                 return;
@@ -240,7 +241,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
                 const charge = event.data.object;
                 res.sendStatus(200);
                 handleRefundEvent(charge, 'webhook_refund').catch(e =>
-                    console.error('refund propagation error:', e.message)
+                    logger.error('refund propagation error:', e.message)
                 );
                 return;
             }
@@ -250,7 +251,7 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
                 const dispute = event.data.object;
                 res.sendStatus(200);
                 handleDisputeEvent(dispute).catch(e =>
-                    console.error('dispute propagation error:', e.message)
+                    logger.error('dispute propagation error:', e.message)
                 );
                 return;
             }
@@ -260,14 +261,14 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
             case 'charge.dispute.closed': {
                 const dispute = event.data.object;
                 res.sendStatus(200);
-                console.log(`charge.dispute.closed status=${dispute.status} for charge=${dispute.charge}`);
+                logger.info(`charge.dispute.closed status=${dispute.status} for charge=${dispute.charge}`);
                 return;
             }
             default:
-                console.log('Unhandled Stripe event:', event.type);
+                logger.info('Unhandled Stripe event:', event.type);
         }
     } catch (e) {
-        console.error('Error handling Stripe event:', e.message);
+        logger.error('Error handling Stripe event:', e.message);
     }
 
     res.sendStatus(200);
@@ -343,7 +344,7 @@ app.post('/webhooks/queue-changed', express.json({ limit: '256kb' }), (req, res)
             // rate limits or transient failures. The next queue mutation
             // will retry the refresh anyway.
             updateQueueChannelEmbed(sessionId).catch((e) => {
-                console.error(`queue-changed embed refresh failed for session ${sessionId}:`, e.message);
+                logger.error(`queue-changed embed refresh failed for session ${sessionId}:`, e.message);
             });
             // Same fire-and-forget for the #duck-race embed. roster.updated
             // events fire it; entry.* and session.* events also fire it
@@ -351,7 +352,7 @@ app.post('/webhooks/queue-changed', express.json({ limit: '256kb' }), (req, res)
             // silently noops when CHANNELS.DUCK_RACE is unset, so dev
             // environments without the channel configured don't break.
             updateDuckRaceEmbed(sessionId).catch((e) => {
-                console.error(`queue-changed duck-race embed refresh failed for session ${sessionId}:`, e.message);
+                logger.error(`queue-changed duck-race embed refresh failed for session ${sessionId}:`, e.message);
             });
 
             // Detect new unique buyer joining the duck race roster and
@@ -391,7 +392,7 @@ app.post('/webhooks/queue-changed', express.json({ limit: '256kb' }), (req, res)
 
         res.sendStatus(200);
     } catch (e) {
-        console.error('queue-changed broadcast failed:', e.message);
+        logger.error('queue-changed broadcast failed:', e.message);
         res.sendStatus(500);
     }
 });
@@ -417,7 +418,7 @@ app.post('/webhooks/activity-changed', express.json({ limit: '64kb' }), (req, re
         broadcastQueue(event, data ?? {});
         res.sendStatus(200);
     } catch (e) {
-        console.error('activity-changed broadcast failed:', e.message);
+        logger.error('activity-changed broadcast failed:', e.message);
         res.sendStatus(500);
     }
 });
@@ -447,7 +448,7 @@ app.post('/webhooks/card-offer-received', express.json({ limit: '64kb' }), async
         const { handleCardOffer } = await import('./handlers/cardOffer.js');
         await handleCardOffer({ data, client: discordClient });
     } catch (e) {
-        console.error('card-offer dispatch failed:', e.message);
+        logger.error('card-offer dispatch failed:', e.message);
     }
 });
 
@@ -477,7 +478,7 @@ app.get('/activity/recent', (req, res) => {
         });
         res.json({ events });
     } catch (e) {
-        console.error('activity/recent query failed:', e.message);
+        logger.error('activity/recent query failed:', e.message);
         res.status(500).json({ error: 'activity feed unavailable' });
     }
 });
@@ -528,7 +529,7 @@ app.get('/battle/checkout/:id', async (req, res) => {
         // Pre-flight inactive-price check before any session work.
         const preflight = await preflightPriceActive(stripe, battle.stripe_price_id, BATTLE_PREFLIGHT_MESSAGES);
         if (preflight) {
-            console.error(
+            logger.error(
                 `Battle checkout pre-flight blocked: ${preflight.code} | priceId=${battle.stripe_price_id} | battleId=${battle.id}`,
                 preflight.detail || '',
             );
@@ -564,7 +565,7 @@ app.get('/battle/checkout/:id', async (req, res) => {
 
         res.redirect(303, session.url);
     } catch (e) {
-        console.error(
+        logger.error(
             `Battle checkout error: ${e?.constructor?.name || 'Error'}: ${e.message} | priceId=${battle.stripe_price_id} | battleId=${battle.id}`,
         );
         // Backstop for the inactive-price race (pre-flight passed but
@@ -619,7 +620,7 @@ app.post('/web/battle/checkout', express.json(), async (req, res) => {
         // Pre-flight inactive-price check before any session work.
         const preflight = await preflightPriceActive(stripe, battle.stripe_price_id, BATTLE_PREFLIGHT_MESSAGES);
         if (preflight) {
-            console.error(
+            logger.error(
                 `Web battle checkout pre-flight blocked: ${preflight.code} | priceId=${battle.stripe_price_id} | battleId=${battle.id}`,
                 preflight.detail || '',
             );
@@ -667,7 +668,7 @@ app.post('/web/battle/checkout', express.json(), async (req, res) => {
         const session = await createCheckoutSession(stripe, params);
         res.json({ url: session.url });
     } catch (e) {
-        console.error(
+        logger.error(
             `Web battle checkout error: ${e?.constructor?.name || 'Error'}: ${e.message} | priceId=${battle.stripe_price_id} | battleId=${battle.id}`,
         );
         // Backstop for the inactive-price race (pre-flight passed but
@@ -749,7 +750,7 @@ app.get('/card-shop/checkout/:listingId', async (req, res) => {
         cardListings.setStripeSessionId.run(session.id, listing.id);
         res.redirect(303, session.url);
     } catch (e) {
-        console.error('Card shop checkout error:', e.message);
+        logger.error('Card shop checkout error:', e.message);
         res.status(500).send('Checkout failed. Try again or contact a mod.');
     }
 });
@@ -768,14 +769,14 @@ app.get('/pull-box/checkout', async (req, res) => {
     try {
         box = await wpPullBox.getActiveBox();
     } catch (e) {
-        console.error('Pull-box service unreachable:', e.message);
+        logger.error('Pull-box service unreachable:', e.message);
         return res.status(503).send('Pull-box service unavailable. Try again in a moment.');
     }
     if (!box) {
         return res.status(404).send('No pull box is currently open.');
     }
     if (!box.stripePriceId) {
-        console.error(`Pull box #${box.id} has no stripe_price_id — check shop settings ACF config`);
+        logger.error(`Pull box #${box.id} has no stripe_price_id — check shop settings ACF config`);
         return res.status(503).send('Pull box not fully configured. Contact a mod.');
     }
 
@@ -825,7 +826,7 @@ app.get('/pull-box/checkout', async (req, res) => {
         const session = await createCheckoutSession(stripe, params);
         res.redirect(303, session.url);
     } catch (e) {
-        console.error('Pull-box checkout error:', e.message);
+        logger.error('Pull-box checkout error:', e.message);
         res.status(500).send('Checkout failed. Try again or contact a mod.');
     }
 });
@@ -868,7 +869,7 @@ app.get('/product/checkout/:priceId', async (req, res) => {
 
         res.redirect(303, session.url);
     } catch (e) {
-        console.error('Product checkout error:', e.message);
+        logger.error('Product checkout error:', e.message);
         res.status(500).send('Checkout failed. Try again or visit the shop directly.');
     }
 });
@@ -928,7 +929,7 @@ app.get('/shipping/checkout', async (req, res) => {
 
         res.redirect(303, session.url);
     } catch (e) {
-        console.error('Shipping checkout error:', e.message);
+        logger.error('Shipping checkout error:', e.message);
         res.status(500).send('Could not create shipping form. Contact a mod.');
     }
 });
@@ -1068,7 +1069,7 @@ app.post('/shipping/start-checkout', express.json(), async (req, res) => {
 
         res.json({ status: 'checkout', url: session.url, amount_cents: amountCents });
     } catch (e) {
-        console.error('Web shipping checkout error:', e.message);
+        logger.error('Web shipping checkout error:', e.message);
         res.status(500).json({ error: 'Could not create checkout session. Try again.' });
     }
 });
@@ -1115,7 +1116,7 @@ function startServer() {
     // Return the http.Server so the caller (index.js) can close() it during
     // graceful shutdown and stop accepting new connections before exit.
     return app.listen(config.PORT, host, () => {
-        console.log(`Webhook server listening on ${host}:${config.PORT}`);
+        logger.info(`Webhook server listening on ${host}:${config.PORT}`);
     });
 }
 

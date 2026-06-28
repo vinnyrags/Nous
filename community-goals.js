@@ -8,6 +8,7 @@
  */
 
 import { EmbedBuilder } from 'discord.js';
+import { logger } from './lib/logger.js';
 import { client, getChannel } from './discord.js';
 import config from './config.js';
 import { goals } from './db.js';
@@ -189,7 +190,7 @@ async function announceMilestone(label) {
 async function initCommunityGoals() {
     const goal = goals.get.get();
     await updatePinnedMessage(goal);
-    console.log(`Community goals initialized: Cycle #${goal.cycle}, $${(goal.cycle_revenue / 100).toFixed(2)}/$${(CYCLE_GOAL / 100).toFixed(2)}`);
+    logger.info(`Community goals initialized: Cycle #${goal.cycle}, $${(goal.cycle_revenue / 100).toFixed(2)}/$${(CYCLE_GOAL / 100).toFixed(2)}`);
 }
 
 export { addRevenue, initCommunityGoals, CYCLE_GOAL, MILESTONE_INCREMENT };
